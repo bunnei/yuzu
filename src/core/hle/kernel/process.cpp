@@ -125,6 +125,11 @@ void Process::Run(VAddr entry_point, s32 main_thread_priority, u32 stack_size) {
                         std::make_shared<std::vector<u8>>(stack_size, 0), 0, stack_size,
                         MemoryState::Mapped)
         .Unwrap();
+
+    // TODO(bunnei): Allocate and map 64MB of heap memory. This should be removed, it's here as a
+    // workaround as libtransistor homebrew apps expect to be loaded with some available heap.
+    HeapAllocate(Memory::HEAP_VADDR, 0x4000000, VMAPermission::ReadWrite);
+
     misc_memory_used += stack_size;
     memory_region->used += stack_size;
 
