@@ -142,7 +142,7 @@ VMManager::VMAIter VMManager::Unmap(VMAIter vma_handle) {
     VirtualMemoryArea& vma = vma_handle->second;
     vma.type = VMAType::Free;
     vma.permissions = VMAPermission::None;
-    vma.meminfo_state = MemoryState::Free;
+    vma.meminfo_state = MemoryState::Unmapped;
 
     vma.backing_block = nullptr;
     vma.offset = 0;
