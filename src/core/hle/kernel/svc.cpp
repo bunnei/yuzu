@@ -322,7 +322,7 @@ static ResultCode GetInfo(u64* result, u64 info_id, u64 handle, u64 info_sub_id)
         *result = vm_manager.GetAddressSpaceSize();
         break;
     case GetInfoType::HeapRegionBaseAddr:
-        *result = vm_manager.GetNewMapRegionBaseAddr() + vm_manager.GetNewMapRegionSize();
+        *result = Memory::HEAP_VADDR;
         break;
     case GetInfoType::HeapRegionSize:
         *result = Memory::HEAP_SIZE;
