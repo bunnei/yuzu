@@ -2,14 +2,14 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <sstream>
 #include <string>
 #include "common/logging/log.h"
 #include "core/hle/ipc_helpers.h"
 #include "core/hle/kernel/client_session.h"
 #include "core/hle/service/lm/lm.h"
 
-namespace Service {
-namespace LM {
+namespace Service::LM {
 
 class Logger final : public ServiceFramework<Logger> {
 public:
@@ -28,25 +28,35 @@ private:
             IsHead = 1,
             IsTail = 2,
         };
+        enum Severity : u32_le {
+            Trace,
+            Info,
+            Warning,
+            Error,
+            Critical,
+        };
 
         u64_le pid;
         u64_le threadContext;
         union {
             BitField<0, 16, Flags> flags;
-            BitField<16, 8, u32_le> severity;
+            BitField<16, 8, Severity> severity;
             BitField<24, 8, u32_le> verbosity;
         };
         u32_le payload_size;
 
-        /// Returns true if this is part of a single log message
-        bool IsSingleMessage() const {
-            return (flags & Flags::IsHead) && (flags & Flags::IsTail);
+        bool IsHeadLog() const {
+            return flags & Flags::IsHead;
+        }
+        bool IsTailLog() const {
+            return flags & Flags::IsTail;
         }
     };
     static_assert(sizeof(MessageHeader) == 0x18, "MessageHeader is incorrect size");
 
     /// Log field type
     enum class Field : u8 {
+        Skip = 1,
         Message = 2,
         Line = 3,
         Filename = 4,
@@ -56,7 +66,7 @@ private:
     };
 
     /**
-     * LM::Initialize service function
+     * LM::Log service function
      *  Inputs:
      *      0: 0x00000000
      *  Outputs:
@@ -64,7 +74,7 @@ private:
      */
     void Log(Kernel::HLERequestContext& ctx) {
         // This function only succeeds - Get that out of the way
-        IPC::RequestBuilder rb{ctx, 1};
+        IPC::ResponseBuilder rb{ctx, 2};
         rb.Push(RESULT_SUCCESS);
 
         // Read MessageHeader, despite not doing anything with it right now
@@ -74,9 +84,9 @@ private:
         Memory::ReadBlock(addr, &header, sizeof(MessageHeader));
         addr += sizeof(MessageHeader);
 
-        if (!header.IsSingleMessage()) {
-            LOG_WARNING(Service, "Multi message logs are unimplemeneted");
-            return;
+        if (header.IsHeadLog()) {
+            log_stream.str("");
+            log_stream.clear();
         }
 
         // Parse out log metadata
@@ -84,7 +94,12 @@ private:
         std::string message, filename, function;
         while (addr < end_addr) {
             const Field field{static_cast<Field>(Memory::Read8(addr++))};
-            size_t length{Memory::Read8(addr++)};
+            const size_t length{Memory::Read8(addr++)};
+
+            if (static_cast<Field>(Memory::Read8(addr)) == Field::Skip) {
+                ++addr;
+            }
+
             switch (field) {
             case Field::Message:
                 message = Memory::ReadCString(addr, length);
@@ -99,32 +114,52 @@ private:
                 function = Memory::ReadCString(addr, length);
                 break;
             }
+
             addr += length;
         }
 
         // Empty log - nothing to do here
-        if (message.empty()) {
+        if (log_stream.str().empty() && message.empty()) {
             return;
         }
 
         // Format a nicely printable string out of the log metadata
-        std::string output;
-        if (filename.size()) {
-            output += filename + ':';
+        if (!filename.empty()) {
+            log_stream << filename << ':';
         }
-        if (function.size()) {
-            output += function + ':';
+        if (!function.empty()) {
+            log_stream << function << ':';
         }
         if (line) {
-            output += std::to_string(line) + ':';
+            log_stream << std::to_string(line) << ':';
         }
-        if (output.back() == ':') {
-            output += ' ';
+        if (log_stream.str().length() > 0 && log_stream.str().back() == ':') {
+            log_stream << ' ';
         }
-        output += message;
+        log_stream << message;
 
-        LOG_DEBUG(Debug_Emulated, "%s", output.c_str());
+        if (header.IsTailLog()) {
+            switch (header.severity) {
+            case MessageHeader::Severity::Trace:
+                NGLOG_TRACE(Debug_Emulated, "{}", log_stream.str());
+                break;
+            case MessageHeader::Severity::Info:
+                NGLOG_INFO(Debug_Emulated, "{}", log_stream.str());
+                break;
+            case MessageHeader::Severity::Warning:
+                NGLOG_WARNING(Debug_Emulated, "{}", log_stream.str());
+                break;
+            case MessageHeader::Severity::Error:
+                NGLOG_ERROR(Debug_Emulated, "{}", log_stream.str());
+                break;
+            case MessageHeader::Severity::Critical:
+                NGLOG_CRITICAL(Debug_Emulated, "{}", log_stream.str());
+                break;
+            }
+        }
     }
+
+    std::ostringstream log_stream;
 };
 
 void InstallInterfaces(SM::ServiceManager& service_manager) {
@@ -139,20 +174,11 @@ void InstallInterfaces(SM::ServiceManager& service_manager) {
  *      0: ResultCode
  */
 void LM::Initialize(Kernel::HLERequestContext& ctx) {
-    auto client_port = std::make_shared<Logger>()->CreatePort();
-    auto session = client_port->Connect();
-    if (session.Succeeded()) {
-        LOG_DEBUG(Service_SM, "called, initialized logger -> session=%u",
-                  (*session)->GetObjectId());
-        IPC::RequestBuilder rb{ctx, 2, 0, 1};
-        rb.Push(RESULT_SUCCESS);
-        rb.PushMoveObjects(std::move(session).Unwrap());
-        registered_loggers.emplace_back(std::move(client_port));
-    } else {
-        UNIMPLEMENTED();
-    }
+    IPC::ResponseBuilder rb{ctx, 2, 0, 1};
+    rb.Push(RESULT_SUCCESS);
+    rb.PushIpcInterface<Logger>();
 
-    LOG_INFO(Service_SM, "called");
+    NGLOG_DEBUG(Service_LM, "called");
 }
 
 LM::LM() : ServiceFramework("lm") {
@@ -162,5 +188,4 @@ LM::LM() : ServiceFramework("lm") {
     RegisterHandlers(functions);
 }
 
-} // namespace LM
-} // namespace Service
+} // namespace Service::LM

@@ -26,10 +26,18 @@ const std::array<int, Settings::NativeButton::NumButtons> Config::default_button
 
 const std::array<std::array<int, 5>, Settings::NativeAnalog::NumAnalogs> Config::default_analogs{{
     {
-        Qt::Key_Up, Qt::Key_Down, Qt::Key_Left, Qt::Key_Right, Qt::Key_E,
+        Qt::Key_Up,
+        Qt::Key_Down,
+        Qt::Key_Left,
+        Qt::Key_Right,
+        Qt::Key_E,
     },
     {
-        Qt::Key_I, Qt::Key_K, Qt::Key_J, Qt::Key_L, Qt::Key_R,
+        Qt::Key_I,
+        Qt::Key_K,
+        Qt::Key_J,
+        Qt::Key_L,
+        Qt::Key_R,
     },
 }};
 
@@ -69,8 +77,8 @@ void Config::ReadValues() {
     qt_config->endGroup();
 
     qt_config->beginGroup("Core");
-    Settings::values.cpu_core =
-        static_cast<Settings::CpuCore>(qt_config->value("cpu_core", 0).toInt());
+    Settings::values.use_cpu_jit = qt_config->value("use_cpu_jit", true).toBool();
+    Settings::values.use_multi_core = qt_config->value("use_multi_core", false).toBool();
     qt_config->endGroup();
 
     qt_config->beginGroup("Renderer");
@@ -86,6 +94,10 @@ void Config::ReadValues() {
     Settings::values.use_virtual_sd = qt_config->value("use_virtual_sd", true).toBool();
     qt_config->endGroup();
 
+    qt_config->beginGroup("System");
+    Settings::values.use_docked_mode = qt_config->value("use_docked_mode", true).toBool();
+    qt_config->endGroup();
+
     qt_config->beginGroup("Miscellaneous");
     Settings::values.log_filter = qt_config->value("log_filter", "*:Info").toString().toStdString();
     qt_config->endGroup();
@@ -96,6 +108,8 @@ void Config::ReadValues() {
     qt_config->endGroup();
 
     qt_config->beginGroup("UI");
+    UISettings::values.theme = qt_config->value("theme", UISettings::themes[0].second).toString();
+
     qt_config->beginGroup("UILayout");
     UISettings::values.geometry = qt_config->value("geometry").toByteArray();
     UISettings::values.state = qt_config->value("state").toByteArray();
@@ -163,7 +177,8 @@ void Config::SaveValues() {
     qt_config->endGroup();
 
     qt_config->beginGroup("Core");
-    qt_config->setValue("cpu_core", static_cast<int>(Settings::values.cpu_core));
+    qt_config->setValue("use_cpu_jit", Settings::values.use_cpu_jit);
+    qt_config->setValue("use_multi_core", Settings::values.use_multi_core);
     qt_config->endGroup();
 
     qt_config->beginGroup("Renderer");
@@ -178,6 +193,10 @@ void Config::SaveValues() {
 
     qt_config->beginGroup("Data Storage");
     qt_config->setValue("use_virtual_sd", Settings::values.use_virtual_sd);
+    qt_config->endGroup();
+
+    qt_config->beginGroup("System");
+    qt_config->setValue("use_docked_mode", Settings::values.use_docked_mode);
     qt_config->endGroup();
 
     qt_config->beginGroup("Miscellaneous");

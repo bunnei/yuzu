@@ -114,8 +114,7 @@ GameList::SearchField::SearchField(GameList* parent) : QWidget{parent} {
     edit_filter->setPlaceholderText(tr("Enter pattern to filter"));
     edit_filter->installEventFilter(keyReleaseEater);
     edit_filter->setClearButtonEnabled(true);
-    connect(edit_filter, SIGNAL(textChanged(const QString&)), parent,
-            SLOT(onTextChanged(const QString&)));
+    connect(edit_filter, &QLineEdit::textChanged, parent, &GameList::onTextChanged);
     label_filter_result = new QLabel;
     button_filter_close = new QToolButton(this);
     button_filter_close->setText("X");
@@ -124,7 +123,7 @@ GameList::SearchField::SearchField(GameList* parent) : QWidget{parent} {
                                        "#000000; font-weight: bold; background: #F0F0F0; }"
                                        "QToolButton:hover{ border: none; padding: 0px; color: "
                                        "#EEEEEE; font-weight: bold; background: #E81123}");
-    connect(button_filter_close, SIGNAL(clicked()), parent, SLOT(onFilterCloseClicked()));
+    connect(button_filter_close, &QToolButton::clicked, parent, &GameList::onFilterCloseClicked);
     layout_filter->setSpacing(10);
     layout_filter->addWidget(label_filter);
     layout_filter->addWidget(edit_filter);
@@ -137,8 +136,8 @@ GameList::SearchField::SearchField(GameList* parent) : QWidget{parent} {
  * Checks if all words separated by spaces are contained in another string
  * This offers a word order insensitive search function
  *
- * @param String that gets checked if it contains all words of the userinput string
- * @param String containing all words getting checked
+ * @param haystack String that gets checked if it contains all words of the userinput string
+ * @param userinput String containing all words getting checked
  * @return true if the haystack contains all words of userinput
  */
 bool GameList::containsAllWords(QString haystack, QString userinput) {
@@ -316,7 +315,8 @@ void GameList::PopupContextMenu(const QPoint& menu_location) {
 void GameList::PopulateAsync(const QString& dir_path, bool deep_scan) {
     if (!FileUtil::Exists(dir_path.toStdString()) ||
         !FileUtil::IsDirectory(dir_path.toStdString())) {
-        LOG_ERROR(Frontend, "Could not find game list folder at %s", dir_path.toLocal8Bit().data());
+        NGLOG_ERROR(Frontend, "Could not find game list folder at {}",
+                    dir_path.toLocal8Bit().data());
         search_field->setFilterResult(0, 0);
         return;
     }
@@ -365,7 +365,7 @@ static bool HasSupportedFileExtension(const std::string& file_name) {
 
 void GameList::RefreshGameDirectory() {
     if (!UISettings::values.gamedir.isEmpty() && current_worker != nullptr) {
-        LOG_INFO(Frontend, "Change detected in the games directory. Reloading game list.");
+        NGLOG_INFO(Frontend, "Change detected in the games directory. Reloading game list.");
         search_field->clear();
         PopulateAsync(UISettings::values.gamedir, UISettings::values.gamedir_deepscan);
     }

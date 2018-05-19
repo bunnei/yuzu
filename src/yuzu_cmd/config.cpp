@@ -27,17 +27,17 @@ bool Config::LoadINI(const std::string& default_contents, bool retry) {
     const char* location = this->sdl2_config_loc.c_str();
     if (sdl2_config->ParseError() < 0) {
         if (retry) {
-            LOG_WARNING(Config, "Failed to load %s. Creating file from defaults...", location);
+            NGLOG_WARNING(Config, "Failed to load {}. Creating file from defaults...", location);
             FileUtil::CreateFullPath(location);
             FileUtil::WriteStringToFile(true, default_contents, location);
             sdl2_config = std::make_unique<INIReader>(location); // Reopen file
 
             return LoadINI(default_contents, false);
         }
-        LOG_ERROR(Config, "Failed.");
+        NGLOG_ERROR(Config, "Failed.");
         return false;
     }
-    LOG_INFO(Config, "Successfully loaded %s", location);
+    NGLOG_INFO(Config, "Successfully loaded {}", location);
     return true;
 }
 
@@ -49,10 +49,18 @@ static const std::array<int, Settings::NativeButton::NumButtons> default_buttons
 
 static const std::array<std::array<int, 5>, Settings::NativeAnalog::NumAnalogs> default_analogs{{
     {
-        SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT, SDL_SCANCODE_D,
+        SDL_SCANCODE_UP,
+        SDL_SCANCODE_DOWN,
+        SDL_SCANCODE_LEFT,
+        SDL_SCANCODE_RIGHT,
+        SDL_SCANCODE_D,
     },
     {
-        SDL_SCANCODE_I, SDL_SCANCODE_K, SDL_SCANCODE_J, SDL_SCANCODE_L, SDL_SCANCODE_D,
+        SDL_SCANCODE_I,
+        SDL_SCANCODE_K,
+        SDL_SCANCODE_J,
+        SDL_SCANCODE_L,
+        SDL_SCANCODE_D,
     },
 }};
 
@@ -82,8 +90,8 @@ void Config::ReadValues() {
         sdl2_config->Get("Controls", "touch_device", "engine:emu_window");
 
     // Core
-    Settings::values.cpu_core =
-        static_cast<Settings::CpuCore>(sdl2_config->GetInteger("Core", "cpu_core", 0));
+    Settings::values.use_cpu_jit = sdl2_config->GetBoolean("Core", "use_cpu_jit", true);
+    Settings::values.use_multi_core = sdl2_config->GetBoolean("Core", "use_multi_core", false);
 
     // Renderer
     Settings::values.resolution_factor =
@@ -98,6 +106,9 @@ void Config::ReadValues() {
     // Data Storage
     Settings::values.use_virtual_sd =
         sdl2_config->GetBoolean("Data Storage", "use_virtual_sd", true);
+
+    // System
+    Settings::values.use_docked_mode = sdl2_config->GetBoolean("System", "use_docked_mode", true);
 
     // Miscellaneous
     Settings::values.log_filter = sdl2_config->Get("Miscellaneous", "log_filter", "*:Trace");

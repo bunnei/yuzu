@@ -19,7 +19,7 @@ public:
 
     void MapBackingMemory(VAddr address, size_t size, u8* memory,
                           Kernel::VMAPermission perms) override;
-
+    void UnmapMemory(u64 address, size_t size) override;
     void SetPC(u64 pc) override;
     u64 GetPC() const override;
     u64 GetReg(int index) const override;
@@ -29,6 +29,8 @@ public:
     u32 GetVFPReg(int index) const override;
     void SetVFPReg(int index, u32 value) override;
     u32 GetCPSR() const override;
+    void Run() override;
+    void Step() override;
     void SetCPSR(u32 cpsr) override;
     VAddr GetTlsAddress() const override;
     void SetTlsAddress(VAddr address) override;
@@ -37,7 +39,6 @@ public:
     void LoadContext(const ThreadContext& ctx) override;
 
     void PrepareReschedule() override;
-    void ExecuteInstructions(int num_instructions) override;
 
     void ClearInstructionCache() override;
     void PageTableChanged() override;
@@ -45,6 +46,8 @@ public:
 private:
     friend class ARM_Dynarmic_Callbacks;
     std::unique_ptr<ARM_Dynarmic_Callbacks> cb;
-    Dynarmic::A64::Jit jit;
+    std::unique_ptr<Dynarmic::A64::Jit> jit;
     ARM_Unicorn inner_unicorn;
+
+    Memory::PageTable* current_page_table = nullptr;
 };

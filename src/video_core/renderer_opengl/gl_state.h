@@ -16,7 +16,7 @@ struct TextureUnit {
     }
 };
 
-constexpr TextureUnit PicaTexture(int unit) {
+constexpr TextureUnit MaxwellTexture(int unit) {
     return TextureUnit{unit};
 }
 
@@ -85,7 +85,7 @@ public:
     struct {
         GLuint texture_2d; // GL_TEXTURE_BINDING_2D
         GLuint sampler;    // GL_SAMPLER_BINDING
-    } texture_units[3];
+    } texture_units[32];
 
     struct {
         GLuint texture_buffer; // GL_TEXTURE_BINDING_BUFFER
@@ -122,27 +122,50 @@ public:
         GLuint vertex_buffer;    // GL_ARRAY_BUFFER_BINDING
         GLuint uniform_buffer;   // GL_UNIFORM_BUFFER_BINDING
         GLuint shader_program;   // GL_CURRENT_PROGRAM
+        GLuint program_pipeline; // GL_PROGRAM_PIPELINE_BINDING
+        struct ConstBufferConfig {
+            bool enabled = false;
+            GLuint bindpoint;
+            GLuint ssbo;
+        };
+        std::array<std::array<ConstBufferConfig, 16>, 5> const_buffers{};
     } draw;
+
+    struct {
+        bool enabled; // GL_SCISSOR_TEST
+        GLint x;
+        GLint y;
+        GLsizei width;
+        GLsizei height;
+    } scissor;
+
+    struct {
+        GLint x;
+        GLint y;
+        GLsizei width;
+        GLsizei height;
+    } viewport;
 
     std::array<bool, 2> clip_distance; // GL_CLIP_DISTANCE
 
     OpenGLState();
 
     /// Get the currently active OpenGL state
-    static const OpenGLState& GetCurState() {
+    static OpenGLState GetCurState() {
         return cur_state;
     }
 
     /// Apply this state as the current OpenGL state
     void Apply() const;
 
-    /// Resets and unbinds any references to the given resource in the current OpenGL state
-    static void ResetTexture(GLuint handle);
-    static void ResetSampler(GLuint handle);
-    static void ResetProgram(GLuint handle);
-    static void ResetBuffer(GLuint handle);
-    static void ResetVertexArray(GLuint handle);
-    static void ResetFramebuffer(GLuint handle);
+    /// Resets any references to the given resource
+    OpenGLState& ResetTexture(GLuint handle);
+    OpenGLState& ResetSampler(GLuint handle);
+    OpenGLState& ResetProgram(GLuint handle);
+    OpenGLState& ResetPipeline(GLuint handle);
+    OpenGLState& ResetBuffer(GLuint handle);
+    OpenGLState& ResetVertexArray(GLuint handle);
+    OpenGLState& ResetFramebuffer(GLuint handle);
 
 private:
     static OpenGLState cur_state;

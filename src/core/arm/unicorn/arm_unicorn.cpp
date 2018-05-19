@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <algorithm>
 #include <unicorn/arm64.h>
 #include "common/assert.h"
 #include "common/microprofile.h"
@@ -29,7 +30,7 @@ LoadDll LoadDll::g_load_dll;
 #define CHECKED(expr)                                                                              \
     do {                                                                                           \
         if (auto _cerr = (expr)) {                                                                 \
-            ASSERT_MSG(false, "Call " #expr " failed with error: %u (%s)\n", _cerr,                \
+            ASSERT_MSG(false, "Call " #expr " failed with error: {} ({})\n", _cerr,                \
                        uc_strerror(_cerr));                                                        \
         }                                                                                          \
     } while (0)
@@ -51,8 +52,9 @@ static void InterruptHook(uc_engine* uc, u32 intNo, void* user_data) {
 static bool UnmappedMemoryHook(uc_engine* uc, uc_mem_type type, u64 addr, int size, u64 value,
                                void* user_data) {
     ARM_Interface::ThreadContext ctx{};
-    Core::CPU().SaveContext(ctx);
-    ASSERT_MSG(false, "Attempted to read from unmapped memory: 0x%llx", addr);
+    Core::CurrentArmInterface().SaveContext(ctx);
+    ASSERT_MSG(false, "Attempted to read from unmapped memory: 0x{:X}, pc=0x{:X}, lr=0x{:X}", addr,
+               ctx.pc, ctx.cpu_registers[30]);
     return {};
 }
 
@@ -74,6 +76,10 @@ ARM_Unicorn::~ARM_Unicorn() {
 void ARM_Unicorn::MapBackingMemory(VAddr address, size_t size, u8* memory,
                                    Kernel::VMAPermission perms) {
     CHECKED(uc_mem_map_ptr(uc, address, size, static_cast<u32>(perms), memory));
+}
+
+void ARM_Unicorn::UnmapMemory(VAddr address, size_t size) {
+    CHECKED(uc_mem_unmap(uc, address, size));
 }
 
 void ARM_Unicorn::SetPC(u64 pc) {
@@ -146,6 +152,14 @@ VAddr ARM_Unicorn::GetTlsAddress() const {
 
 void ARM_Unicorn::SetTlsAddress(VAddr base) {
     CHECKED(uc_reg_write(uc, UC_ARM64_REG_TPIDRRO_EL0, &base));
+}
+
+void ARM_Unicorn::Run() {
+    ExecuteInstructions(std::max(CoreTiming::GetDowncount(), 0));
+}
+
+void ARM_Unicorn::Step() {
+    ExecuteInstructions(1);
 }
 
 MICROPROFILE_DEFINE(ARM_Jit, "ARM JIT", "ARM JIT", MP_RGB(255, 64, 64));

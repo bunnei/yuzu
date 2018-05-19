@@ -121,7 +121,7 @@ void CopyDir(const std::string& source_path, const std::string& dest_path);
 // Set the current directory to given directory
 bool SetCurrentDir(const std::string& directory);
 
-// Returns a pointer to a string with a Citra data dir in the user's home
+// Returns a pointer to a string with a yuzu data dir in the user's home
 // directory. To be used in "multi-user" mode (that is, installed).
 const std::string& GetUserPath(const unsigned int DirIDX, const std::string& newPath = "");
 
@@ -160,22 +160,18 @@ public:
 
     ~IOFile();
 
-    IOFile(IOFile&& other);
-    IOFile& operator=(IOFile&& other);
+    IOFile(IOFile&& other) noexcept;
+    IOFile& operator=(IOFile&& other) noexcept;
 
-    void Swap(IOFile& other);
+    void Swap(IOFile& other) noexcept;
 
     bool Open(const std::string& filename, const char openmode[]);
     bool Close();
 
     template <typename T>
     size_t ReadArray(T* data, size_t length) {
-        static_assert(std::is_standard_layout<T>(),
-                      "Given array does not consist of standard layout objects");
-#if (__GNUC__ >= 5) || defined(__clang__) || defined(_MSC_VER)
         static_assert(std::is_trivially_copyable<T>(),
                       "Given array does not consist of trivially copyable objects");
-#endif
 
         if (!IsOpen()) {
             m_good = false;
@@ -191,12 +187,8 @@ public:
 
     template <typename T>
     size_t WriteArray(const T* data, size_t length) {
-        static_assert(std::is_standard_layout<T>(),
-                      "Given array does not consist of standard layout objects");
-#if (__GNUC__ >= 5) || defined(__clang__) || defined(_MSC_VER)
         static_assert(std::is_trivially_copyable<T>(),
                       "Given array does not consist of trivially copyable objects");
-#endif
 
         if (!IsOpen()) {
             m_good = false;
@@ -210,11 +202,15 @@ public:
         return items_written;
     }
 
-    size_t ReadBytes(void* data, size_t length) {
+    template <typename T>
+    size_t ReadBytes(T* data, size_t length) {
+        static_assert(std::is_trivially_copyable<T>(), "T must be trivially copyable");
         return ReadArray(reinterpret_cast<char*>(data), length);
     }
 
-    size_t WriteBytes(const void* data, size_t length) {
+    template <typename T>
+    size_t WriteBytes(const T* data, size_t length) {
+        static_assert(std::is_trivially_copyable<T>(), "T must be trivially copyable");
         return WriteArray(reinterpret_cast<const char*>(data), length);
     }
 
@@ -253,7 +249,7 @@ private:
     bool m_good = true;
 };
 
-} // namespace
+} // namespace FileUtil
 
 // To deal with Windows being dumb at unicode:
 template <typename T>

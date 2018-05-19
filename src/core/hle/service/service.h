@@ -21,7 +21,7 @@ class ClientPort;
 class ServerPort;
 class ServerSession;
 class HLERequestContext;
-}
+} // namespace Kernel
 
 namespace Service {
 
@@ -178,7 +178,7 @@ private:
 };
 
 /// Initialize ServiceManager
-void Init();
+void Init(std::shared_ptr<SM::ServiceManager>& sm);
 
 /// Shutdown ServiceManager
 void Shutdown();
@@ -189,4 +189,4 @@ extern std::unordered_map<std::string, Kernel::SharedPtr<Kernel::ClientPort>> g_
 /// Adds a port to the named port table
 void AddNamedPort(std::string name, Kernel::SharedPtr<Kernel::ClientPort> port);
 
-} // namespace
+} // namespace Service

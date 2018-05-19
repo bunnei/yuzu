@@ -2,8 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
-#ifndef _CITRA_QT_MAIN_HXX_
-#define _CITRA_QT_MAIN_HXX_
+#pragma once
 
 #include <memory>
 #include <QMainWindow>
@@ -15,16 +14,17 @@ class Config;
 class EmuThread;
 class GameList;
 class GImageInfo;
-class GPUCommandStreamWidget;
-class GPUCommandListWidget;
 class GraphicsBreakPointsWidget;
-class GraphicsTracingWidget;
-class GraphicsVertexShaderWidget;
+class GraphicsSurfaceWidget;
 class GRenderWindow;
 class MicroProfileDialog;
 class ProfilerWidget;
 class RegistersWidget;
 class WaitTreeWidget;
+
+namespace Tegra {
+class DebugContext;
+}
 
 class GMainWindow : public QMainWindow {
     Q_OBJECT
@@ -63,6 +63,9 @@ signals:
      * system emulation handles and memory are still valid, but are about become invalid.
      */
     void EmulationStopping();
+
+    // Signal that tells widgets to update icons to use the current theme
+    void UpdateThemedIcons();
 
 private:
     void InitializeWidgets();
@@ -138,6 +141,8 @@ private:
 
     Ui::MainWindow ui;
 
+    std::shared_ptr<Tegra::DebugContext> debug_context;
+
     GRenderWindow* render_window;
     GameList* game_list;
 
@@ -150,7 +155,7 @@ private:
 
     std::unique_ptr<Config> config;
 
-    // Whether emulation is currently running in Citra.
+    // Whether emulation is currently running in yuzu.
     bool emulation_running = false;
     std::unique_ptr<EmuThread> emu_thread;
 
@@ -158,14 +163,17 @@ private:
     ProfilerWidget* profilerWidget;
     MicroProfileDialog* microProfileDialog;
     RegistersWidget* registersWidget;
+    GraphicsBreakPointsWidget* graphicsBreakpointsWidget;
+    GraphicsSurfaceWidget* graphicsSurfaceWidget;
     WaitTreeWidget* waitTreeWidget;
 
     QAction* actions_recent_files[max_recent_files_item];
+
+    // stores default icon theme search paths for the platform
+    QStringList default_theme_paths;
 
 protected:
     void dropEvent(QDropEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
 };
-
-#endif // _CITRA_QT_MAIN_HXX_

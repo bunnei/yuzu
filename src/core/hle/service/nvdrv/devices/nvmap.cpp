@@ -3,39 +3,37 @@
 // Refer to the license.txt file included.
 
 #include <algorithm>
+#include <cinttypes>
 
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "core/hle/service/nvdrv/devices/nvmap.h"
 
-namespace Service {
-namespace NVDRV {
-namespace Devices {
+namespace Service::Nvidia::Devices {
 
 VAddr nvmap::GetObjectAddress(u32 handle) const {
-    auto itr = handles.find(handle);
-    ASSERT(itr != handles.end());
-
-    auto object = itr->second;
+    auto object = GetObject(handle);
+    ASSERT(object);
     ASSERT(object->status == Object::Status::Allocated);
     return object->addr;
 }
 
-u32 nvmap::ioctl(u32 command, const std::vector<u8>& input, std::vector<u8>& output) {
-    switch (command) {
-    case IocCreateCommand:
+u32 nvmap::ioctl(Ioctl command, const std::vector<u8>& input, std::vector<u8>& output) {
+    switch (static_cast<IoctlCommand>(command.raw)) {
+    case IoctlCommand::Create:
         return IocCreate(input, output);
-    case IocAllocCommand:
+    case IoctlCommand::Alloc:
         return IocAlloc(input, output);
-    case IocGetIdCommand:
+    case IoctlCommand::GetId:
         return IocGetId(input, output);
-    case IocFromIdCommand:
+    case IoctlCommand::FromId:
         return IocFromId(input, output);
-    case IocParamCommand:
+    case IoctlCommand::Param:
         return IocParam(input, output);
     }
 
-    UNIMPLEMENTED();
+    UNIMPLEMENTED_MSG("Unimplemented ioctl");
+    return 0;
 }
 
 u32 nvmap::IocCreate(const std::vector<u8>& input, std::vector<u8>& output) {
@@ -51,7 +49,7 @@ u32 nvmap::IocCreate(const std::vector<u8>& input, std::vector<u8>& output) {
     u32 handle = next_handle++;
     handles[handle] = std::move(object);
 
-    LOG_WARNING(Service, "(STUBBED) size 0x%08X", params.size);
+    NGLOG_DEBUG(Service_NVDRV, "size=0x{:08X}", params.size);
 
     params.handle = handle;
 
@@ -63,17 +61,16 @@ u32 nvmap::IocAlloc(const std::vector<u8>& input, std::vector<u8>& output) {
     IocAllocParams params;
     std::memcpy(&params, input.data(), sizeof(params));
 
-    auto itr = handles.find(params.handle);
-    ASSERT(itr != handles.end());
+    auto object = GetObject(params.handle);
+    ASSERT(object);
 
-    auto object = itr->second;
     object->flags = params.flags;
     object->align = params.align;
     object->kind = params.kind;
     object->addr = params.addr;
     object->status = Object::Status::Allocated;
 
-    LOG_WARNING(Service, "(STUBBED) Allocated address 0x%llx", params.addr);
+    NGLOG_DEBUG(Service_NVDRV, "called, addr={:X}", params.addr);
 
     std::memcpy(output.data(), &params, sizeof(params));
     return 0;
@@ -83,12 +80,12 @@ u32 nvmap::IocGetId(const std::vector<u8>& input, std::vector<u8>& output) {
     IocGetIdParams params;
     std::memcpy(&params, input.data(), sizeof(params));
 
-    LOG_WARNING(Service, "called");
+    NGLOG_WARNING(Service_NVDRV, "called");
 
-    auto itr = handles.find(params.handle);
-    ASSERT(itr != handles.end());
+    auto object = GetObject(params.handle);
+    ASSERT(object);
 
-    params.id = itr->second->id;
+    params.id = object->id;
 
     std::memcpy(output.data(), &params, sizeof(params));
     return 0;
@@ -98,17 +95,14 @@ u32 nvmap::IocFromId(const std::vector<u8>& input, std::vector<u8>& output) {
     IocFromIdParams params;
     std::memcpy(&params, input.data(), sizeof(params));
 
-    LOG_WARNING(Service, "(STUBBED) called");
+    NGLOG_WARNING(Service_NVDRV, "(STUBBED) called");
 
     auto itr = std::find_if(handles.begin(), handles.end(),
                             [&](const auto& entry) { return entry.second->id == params.id; });
     ASSERT(itr != handles.end());
 
-    // Make a new handle for the object
-    u32 handle = next_handle++;
-    handles[handle] = itr->second;
-
-    params.handle = handle;
+    // Return the existing handle instead of creating a new one.
+    params.handle = itr->first;
 
     std::memcpy(output.data(), &params, sizeof(params));
     return 0;
@@ -120,12 +114,10 @@ u32 nvmap::IocParam(const std::vector<u8>& input, std::vector<u8>& output) {
     IocParamParams params;
     std::memcpy(&params, input.data(), sizeof(params));
 
-    LOG_WARNING(Service, "(STUBBED) called type=%u", params.type);
+    NGLOG_WARNING(Service_NVDRV, "(STUBBED) called type={}", params.type);
 
-    auto itr = handles.find(params.handle);
-    ASSERT(itr != handles.end());
-
-    auto object = itr->second;
+    auto object = GetObject(params.handle);
+    ASSERT(object);
     ASSERT(object->status == Object::Status::Allocated);
 
     switch (static_cast<ParamTypes>(params.type)) {
@@ -150,6 +142,4 @@ u32 nvmap::IocParam(const std::vector<u8>& input, std::vector<u8>& output) {
     return 0;
 }
 
-} // namespace Devices
-} // namespace NVDRV
-} // namespace Service
+} // namespace Service::Nvidia::Devices

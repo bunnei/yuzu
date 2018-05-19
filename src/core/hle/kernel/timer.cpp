@@ -57,7 +57,8 @@ void Timer::Set(s64 initial, s64 interval) {
         // Immediately invoke the callback
         Signal(0);
     } else {
-        CoreTiming::ScheduleEvent(nsToCycles(initial), timer_callback_event_type, callback_handle);
+        CoreTiming::ScheduleEvent(CoreTiming::nsToCycles(initial), timer_callback_event_type,
+                                  callback_handle);
     }
 }
 
@@ -77,7 +78,7 @@ void Timer::WakeupAllWaitingThreads() {
 }
 
 void Timer::Signal(int cycles_late) {
-    LOG_TRACE(Kernel, "Timer %u fired", GetObjectId());
+    NGLOG_TRACE(Kernel, "Timer {} fired", GetObjectId());
 
     signaled = true;
 
@@ -86,7 +87,7 @@ void Timer::Signal(int cycles_late) {
 
     if (interval_delay != 0) {
         // Reschedule the timer with the interval delay
-        CoreTiming::ScheduleEvent(nsToCycles(interval_delay) - cycles_late,
+        CoreTiming::ScheduleEvent(CoreTiming::nsToCycles(interval_delay) - cycles_late,
                                   timer_callback_event_type, callback_handle);
     }
 }
@@ -97,7 +98,7 @@ static void TimerCallback(u64 timer_handle, int cycles_late) {
         timer_callback_handle_table.Get<Timer>(static_cast<Handle>(timer_handle));
 
     if (timer == nullptr) {
-        LOG_CRITICAL(Kernel, "Callback fired for invalid timer %08" PRIx64, timer_handle);
+        NGLOG_CRITICAL(Kernel, "Callback fired for invalid timer {:016X}", timer_handle);
         return;
     }
 
@@ -111,4 +112,4 @@ void TimersInit() {
 
 void TimersShutdown() {}
 
-} // namespace
+} // namespace Kernel

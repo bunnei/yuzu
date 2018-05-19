@@ -1,12 +1,10 @@
 #include <QApplication>
 #include <QHBoxLayout>
 #include <QKeyEvent>
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-// Required for screen DPI information
 #include <QScreen>
 #include <QWindow>
-#endif
+
+#include <fmt/format.h>
 
 #include "common/microprofile.h"
 #include "common/scm_rev.h"
@@ -19,8 +17,7 @@
 #include "input_common/motion_emu.h"
 #include "yuzu/bootmanager.h"
 
-EmuThread::EmuThread(GRenderWindow* render_window)
-    : exec_step(false), running(false), stop_run(false), render_window(render_window) {}
+EmuThread::EmuThread(GRenderWindow* render_window) : render_window(render_window) {}
 
 void EmuThread::run() {
     render_window->MakeCurrent();
@@ -107,8 +104,8 @@ private:
 GRenderWindow::GRenderWindow(QWidget* parent, EmuThread* emu_thread)
     : QWidget(parent), child(nullptr), emu_thread(emu_thread) {
 
-    std::string window_title = Common::StringFromFormat("yuzu %s| %s-%s", Common::g_build_name,
-                                                        Common::g_scm_branch, Common::g_scm_desc);
+    std::string window_title = fmt::format("yuzu {} | {}-{}", Common::g_build_name,
+                                           Common::g_scm_branch, Common::g_scm_desc);
     setWindowTitle(QString::fromStdString(window_title));
 
     InputCommon::Init();
@@ -120,15 +117,13 @@ GRenderWindow::~GRenderWindow() {
 
 void GRenderWindow::moveContext() {
     DoneCurrent();
-// We need to move GL context to the swapping thread in Qt5
-#if QT_VERSION > QT_VERSION_CHECK(5, 0, 0)
+
     // If the thread started running, move the GL Context to the new thread. Otherwise, move it
     // back.
     auto thread = (QThread::currentThread() == qApp->thread() && emu_thread != nullptr)
                       ? emu_thread
                       : qApp->thread();
     child->context()->moveToThread(thread);
-#endif
 }
 
 void GRenderWindow::SwapBuffers() {
@@ -191,12 +186,8 @@ QByteArray GRenderWindow::saveGeometry() {
 }
 
 qreal GRenderWindow::windowPixelRatio() {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
     // windowHandle() might not be accessible until the window is displayed to screen.
     return windowHandle() ? windowHandle()->screen()->devicePixelRatio() : 1.0f;
-#else
-    return 1.0f;
-#endif
 }
 
 void GRenderWindow::closeEvent(QCloseEvent* event) {
@@ -299,9 +290,7 @@ void GRenderWindow::OnEmulationStopping() {
 void GRenderWindow::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
     // windowHandle() is not initialized until the Window is shown, so we connect it here.
-    connect(this->windowHandle(), SIGNAL(screenChanged(QScreen*)), this,
-            SLOT(OnFramebufferSizeChanged()), Qt::UniqueConnection);
-#endif
+    connect(windowHandle(), &QWindow::screenChanged, this, &GRenderWindow::OnFramebufferSizeChanged,
+            Qt::UniqueConnection);
 }

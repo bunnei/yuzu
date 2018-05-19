@@ -10,7 +10,7 @@
 #include "common/common_types.h"
 #include "core/hle/result.h"
 #include "core/memory.h"
-#include "core/mmio.h"
+#include "core/memory_hook.h"
 
 namespace Kernel {
 
@@ -41,15 +41,24 @@ enum class VMAPermission : u8 {
 
 /// Set of values returned in MemoryInfo.state by svcQueryMemory.
 enum class MemoryState : u32 {
-    Free = 0,
-    IO = 1,
-    Normal = 2,
-    Code = 3,
-    Static = 4,
-    Heap = 5,
-    Shared = 6,
-    Mapped = 6,
-    ThreadLocalStorage = 12,
+    Unmapped = 0x0,
+    Io = 0x1,
+    Normal = 0x2,
+    CodeStatic = 0x3,
+    CodeMutable = 0x4,
+    Heap = 0x5,
+    Shared = 0x6,
+    ModuleCodeStatic = 0x8,
+    ModuleCodeMutable = 0x9,
+    IpcBuffer0 = 0xA,
+    Mapped = 0xB,
+    ThreadLocal = 0xC,
+    TransferMemoryIsolated = 0xD,
+    TransferMemory = 0xE,
+    ProcessMemory = 0xF,
+    IpcBuffer1 = 0x11,
+    IpcBuffer3 = 0x12,
+    KernelStack = 0x13,
 };
 
 /**
@@ -66,7 +75,7 @@ struct VirtualMemoryArea {
     VMAType type = VMAType::Free;
     VMAPermission permissions = VMAPermission::None;
     /// Tag returned by svcQueryMemory. Not otherwise used.
-    MemoryState meminfo_state = MemoryState::Free;
+    MemoryState meminfo_state = MemoryState::Unmapped;
 
     // Settings for type = AllocatedMemoryBlock
     /// Memory block backing this VMA.
@@ -81,7 +90,7 @@ struct VirtualMemoryArea {
     // Settings for type = MMIO
     /// Physical address of the register area this VMA maps to.
     PAddr paddr = 0;
-    Memory::MMIORegionPointer mmio_handler = nullptr;
+    Memory::MemoryHookPointer mmio_handler = nullptr;
 
     /// Tests if this area can be merged to the right with `next`.
     bool CanBeMergedWith(const VirtualMemoryArea& next) const;
@@ -160,7 +169,7 @@ public:
      * @param mmio_handler The handler that will implement read and write for this MMIO region.
      */
     ResultVal<VMAHandle> MapMMIO(VAddr target, PAddr paddr, u64 size, MemoryState state,
-                                 Memory::MMIORegionPointer mmio_handler);
+                                 Memory::MemoryHookPointer mmio_handler);
 
     /// Unmaps a range of addresses, splitting VMAs as necessary.
     ResultCode UnmapRange(VAddr target, u64 size);
@@ -178,7 +187,7 @@ public:
     void RefreshMemoryBlockMappings(const std::vector<u8>* block);
 
     /// Dumps the address space layout to the log, for debugging
-    void LogLayout(Log::Level log_level) const;
+    void LogLayout() const;
 
     /// Gets the total memory usage, used by svcGetInfo
     u64 GetTotalMemoryUsage();
@@ -191,12 +200,6 @@ public:
 
     /// Gets the total address space address size, used by svcGetInfo
     u64 GetAddressSpaceSize();
-
-    /// Gets the base address for a new memory region, used by svcGetInfo
-    VAddr GetNewMapRegionBaseAddr();
-
-    /// Gets the size for a new memory region, used by svcGetInfo
-    u64 GetNewMapRegionSize();
 
     /// Each VMManager has its own page table, which is set as the main one when the owning process
     /// is scheduled.

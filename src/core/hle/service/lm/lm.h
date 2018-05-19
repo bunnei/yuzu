@@ -5,12 +5,10 @@
 #pragma once
 
 #include <vector>
-#include "core/hle/kernel/client_port.h"
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/service/service.h"
 
-namespace Service {
-namespace LM {
+namespace Service::LM {
 
 class LM final : public ServiceFramework<LM> {
 public:
@@ -19,12 +17,9 @@ public:
 
 private:
     void Initialize(Kernel::HLERequestContext& ctx);
-
-    std::vector<Kernel::SharedPtr<Kernel::ClientPort>> registered_loggers;
 };
 
 /// Registers all LM services with the specified service manager.
 void InstallInterfaces(SM::ServiceManager& service_manager);
 
-} // namespace LM
-} // namespace Service
+} // namespace Service::LM

@@ -5,8 +5,10 @@
 #include <vector>
 
 #include "common/common_funcs.h"
+#include "common/file_util.h"
 #include "common/logging/log.h"
 #include "common/swap.h"
+#include "core/core.h"
 #include "core/hle/kernel/process.h"
 #include "core/hle/kernel/resource_limit.h"
 #include "core/loader/nro.h"
@@ -45,7 +47,10 @@ struct ModHeader {
 };
 static_assert(sizeof(ModHeader) == 0x1c, "ModHeader has incorrect size.");
 
-FileType AppLoader_NRO::IdentifyType(FileUtil::IOFile& file) {
+AppLoader_NRO::AppLoader_NRO(FileUtil::IOFile&& file, std::string filepath)
+    : AppLoader(std::move(file)), filepath(std::move(filepath)) {}
+
+FileType AppLoader_NRO::IdentifyType(FileUtil::IOFile& file, const std::string&) {
     // Read NSO header
     NroHeader nro_header{};
     file.Seek(0, SEEK_SET);
@@ -60,20 +65,6 @@ FileType AppLoader_NRO::IdentifyType(FileUtil::IOFile& file) {
 
 static constexpr u32 PageAlignSize(u32 size) {
     return (size + Memory::PAGE_MASK) & ~Memory::PAGE_MASK;
-}
-
-static std::vector<u8> ReadSegment(FileUtil::IOFile& file, const NroSegmentHeader& header) {
-    std::vector<u8> data;
-    data.resize(header.size);
-
-    file.Seek(header.offset + sizeof(NroHeader), SEEK_SET);
-    size_t bytes_read{file.ReadBytes(data.data(), header.size)};
-    if (header.size != PageAlignSize(static_cast<u32>(bytes_read))) {
-        LOG_CRITICAL(Loader, "Failed to read NRO segment bytes", header.size);
-        return {};
-    }
-
-    return data;
 }
 
 bool AppLoader_NRO::LoadNro(const std::string& path, VAddr load_base) {
@@ -93,9 +84,9 @@ bool AppLoader_NRO::LoadNro(const std::string& path, VAddr load_base) {
     }
 
     // Build program image
-    Kernel::SharedPtr<Kernel::CodeSet> codeset = Kernel::CodeSet::Create("", 0);
+    Kernel::SharedPtr<Kernel::CodeSet> codeset = Kernel::CodeSet::Create("");
     std::vector<u8> program_image;
-    program_image.resize(PageAlignSize(nro_header.file_size + nro_header.bss_size));
+    program_image.resize(PageAlignSize(nro_header.file_size));
     file.Seek(0, SEEK_SET);
     file.ReadBytes(program_image.data(), nro_header.file_size);
 
@@ -107,28 +98,22 @@ bool AppLoader_NRO::LoadNro(const std::string& path, VAddr load_base) {
 
     // Read MOD header
     ModHeader mod_header{};
-    u32 bss_size{Memory::PAGE_SIZE}; // Default .bss to page size if MOD0 section doesn't exist
+    // Default .bss to NRO header bss size if MOD0 section doesn't exist
+    u32 bss_size{PageAlignSize(nro_header.bss_size)};
     std::memcpy(&mod_header, program_image.data() + nro_header.module_header_offset,
                 sizeof(ModHeader));
     const bool has_mod_header{mod_header.magic == Common::MakeMagic('M', 'O', 'D', '0')};
     if (has_mod_header) {
         // Resize program image to include .bss section and page align each section
         bss_size = PageAlignSize(mod_header.bss_end_offset - mod_header.bss_start_offset);
-        codeset->data.size += bss_size;
     }
-    program_image.resize(PageAlignSize(static_cast<u32>(program_image.size()) + bss_size));
-
-    // Relocate symbols if there was a proper MOD header - This must happen after the image has been
-    // loaded into memory
-    if (has_mod_header) {
-        Relocate(program_image, nro_header.module_header_offset + mod_header.dynamic_offset,
-                 load_base);
-    }
+    codeset->data.size += bss_size;
+    program_image.resize(static_cast<u32>(program_image.size()) + bss_size);
 
     // Load codeset for current process
     codeset->name = path;
     codeset->memory = std::make_shared<std::vector<u8>>(std::move(program_image));
-    Kernel::g_current_process->LoadModule(codeset, load_base);
+    Core::CurrentProcess()->LoadModule(codeset, load_base);
 
     return true;
 }
@@ -141,9 +126,9 @@ ResultStatus AppLoader_NRO::Load(Kernel::SharedPtr<Kernel::Process>& process) {
         return ResultStatus::Error;
     }
 
-    // Load and relocate "main" and "sdk" NSO
+    // Load NRO
     static constexpr VAddr base_addr{Memory::PROCESS_IMAGE_VADDR};
-    process = Kernel::Process::Create("main");
+
     if (!LoadNro(filepath, base_addr)) {
         return ResultStatus::ErrorInvalidFormat;
     }
@@ -152,9 +137,7 @@ ResultStatus AppLoader_NRO::Load(Kernel::SharedPtr<Kernel::Process>& process) {
     process->address_mappings = default_address_mappings;
     process->resource_limit =
         Kernel::ResourceLimit::GetForCategory(Kernel::ResourceLimitCategory::APPLICATION);
-    process->Run(base_addr, 48, Kernel::DEFAULT_STACK_SIZE);
-
-    ResolveImports();
+    process->Run(base_addr, THREADPRIO_DEFAULT, Memory::DEFAULT_STACK_SIZE);
 
     is_loaded = true;
     return ResultStatus::Success;

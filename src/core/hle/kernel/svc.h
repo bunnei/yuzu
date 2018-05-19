@@ -14,7 +14,11 @@ struct MemoryInfo {
     u32 type;
     u32 attributes;
     u32 permission;
+    u32 device_refcount;
+    u32 ipc_refcount;
+    INSERT_PADDING_WORDS(1);
 };
+static_assert(sizeof(MemoryInfo) == 0x28, "MemoryInfo has incorrect size.");
 
 struct PageInfo {
     u64 flags;
@@ -24,14 +28,28 @@ struct PageInfo {
 enum class GetInfoType : u64 {
     // 1.0.0+
     AllowedCpuIdBitmask = 0,
+    AllowedThreadPrioBitmask = 1,
+    MapRegionBaseAddr = 2,
+    MapRegionSize = 3,
+    HeapRegionBaseAddr = 4,
+    HeapRegionSize = 5,
     TotalMemoryUsage = 6,
     TotalHeapUsage = 7,
+    IsCurrentProcessBeingDebugged = 8,
+    ResourceHandleLimit = 9,
+    IdleTickCount = 10,
     RandomEntropy = 11,
+    PerformanceCounter = 0xF0000002,
     // 2.0.0+
     AddressSpaceBaseAddr = 12,
     AddressSpaceSize = 13,
     NewMapRegionBaseAddr = 14,
     NewMapRegionSize = 15,
+    // 3.0.0+
+    IsVirtualAddressMemoryEnabled = 16,
+    TitleId = 18,
+    // 4.0.0+
+    PrivilegedProcessId = 19,
 };
 
 void CallSVC(u32 immediate);

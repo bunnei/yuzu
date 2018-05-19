@@ -65,14 +65,14 @@ bool Filter::ParseFilterRule(const std::string::const_iterator begin,
                              const std::string::const_iterator end) {
     auto level_separator = std::find(begin, end, ':');
     if (level_separator == end) {
-        LOG_ERROR(Log, "Invalid log filter. Must specify a log level after `:`: %s",
-                  std::string(begin, end).c_str());
+        NGLOG_ERROR(Log, "Invalid log filter. Must specify a log level after `:`: %s",
+                    std::string(begin, end).c_str());
         return false;
     }
 
     const Level level = GetLevelByName(level_separator + 1, end);
     if (level == Level::Count) {
-        LOG_ERROR(Log, "Unknown log level in filter: %s", std::string(begin, end).c_str());
+        NGLOG_ERROR(Log, "Unknown log level in filter: %s", std::string(begin, end).c_str());
         return false;
     }
 
@@ -83,7 +83,7 @@ bool Filter::ParseFilterRule(const std::string::const_iterator begin,
 
     const Class log_class = GetClassByName(begin, level_separator);
     if (log_class == Class::Count) {
-        LOG_ERROR(Log, "Unknown log class in filter: %s", std::string(begin, end).c_str());
+        NGLOG_ERROR(Log, "Unknown log class in filter: %s", std::string(begin, end).c_str());
         return false;
     }
 
@@ -94,4 +94,4 @@ bool Filter::ParseFilterRule(const std::string::const_iterator begin,
 bool Filter::CheckMessage(Class log_class, Level level) const {
     return static_cast<u8>(level) >= static_cast<u8>(class_levels[static_cast<size_t>(log_class)]);
 }
-}
+} // namespace Log

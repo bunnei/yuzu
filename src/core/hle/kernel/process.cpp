@@ -20,12 +20,9 @@ namespace Kernel {
 // Lists all processes that exist in the current session.
 static std::vector<SharedPtr<Process>> process_list;
 
-SharedPtr<CodeSet> CodeSet::Create(std::string name, u64 program_id) {
+SharedPtr<CodeSet> CodeSet::Create(std::string name) {
     SharedPtr<CodeSet> codeset(new CodeSet);
-
     codeset->name = std::move(name);
-    codeset->program_id = program_id;
-
     return codeset;
 }
 
@@ -41,6 +38,7 @@ SharedPtr<Process> Process::Create(std::string&& name) {
     process->flags.raw = 0;
     process->flags.memory_region.Assign(MemoryRegion::APPLICATION);
     process->status = ProcessStatus::Created;
+    process->program_id = 0;
 
     process_list.push_back(process);
     return process;
@@ -56,7 +54,7 @@ void Process::ParseKernelCaps(const u32* kernel_caps, size_t len) {
             continue;
         } else if ((type & 0xF00) == 0xE00) { // 0x0FFF
             // Allowed interrupts list
-            LOG_WARNING(Loader, "ExHeader allowed interrupts list ignored");
+            NGLOG_WARNING(Loader, "ExHeader allowed interrupts list ignored");
         } else if ((type & 0xF80) == 0xF00) { // 0x07FF
             // Allowed syscalls mask
             unsigned int index = ((descriptor >> 24) & 7) * 24;
@@ -76,7 +74,7 @@ void Process::ParseKernelCaps(const u32* kernel_caps, size_t len) {
         } else if ((type & 0xFFE) == 0xFF8) { // 0x001F
             // Mapped memory range
             if (i + 1 >= len || ((kernel_caps[i + 1] >> 20) & 0xFFE) != 0xFF8) {
-                LOG_WARNING(Loader, "Incomplete exheader memory range descriptor ignored.");
+                NGLOG_WARNING(Loader, "Incomplete exheader memory range descriptor ignored.");
                 continue;
             }
             u32 end_desc = kernel_caps[i + 1];
@@ -111,19 +109,21 @@ void Process::ParseKernelCaps(const u32* kernel_caps, size_t len) {
 
             int minor = kernel_version & 0xFF;
             int major = (kernel_version >> 8) & 0xFF;
-            LOG_INFO(Loader, "ExHeader kernel version: %d.%d", major, minor);
+            NGLOG_INFO(Loader, "ExHeader kernel version: {}.{}", major, minor);
         } else {
-            LOG_ERROR(Loader, "Unhandled kernel caps descriptor: 0x%08X", descriptor);
+            NGLOG_ERROR(Loader, "Unhandled kernel caps descriptor: 0x{:08X}", descriptor);
         }
     }
 }
 
 void Process::Run(VAddr entry_point, s32 main_thread_priority, u32 stack_size) {
-    // Allocate and map stack
+    // Allocate and map the main thread stack
+    // TODO(bunnei): This is heap area that should be allocated by the kernel and not mapped as part
+    // of the user address space.
     vm_manager
-        .MapMemoryBlock(Memory::HEAP_VADDR_END - stack_size,
+        .MapMemoryBlock(Memory::STACK_AREA_VADDR_END - stack_size,
                         std::make_shared<std::vector<u8>>(stack_size, 0), 0, stack_size,
-                        MemoryState::Heap)
+                        MemoryState::Mapped)
         .Unwrap();
     misc_memory_used += stack_size;
     memory_region->used += stack_size;
@@ -134,7 +134,7 @@ void Process::Run(VAddr entry_point, s32 main_thread_priority, u32 stack_size) {
         HandleSpecialMapping(vm_manager, mapping);
     }
 
-    vm_manager.LogLayout(Log::Level::Debug);
+    vm_manager.LogLayout();
     status = ProcessStatus::Running;
 
     Kernel::SetupMainThread(entry_point, main_thread_priority, this);
@@ -155,9 +155,9 @@ void Process::LoadModule(SharedPtr<CodeSet> module_, VAddr base_addr) {
     };
 
     // Map CodeSet segments
-    MapSegment(module_->code, VMAPermission::ReadExecute, MemoryState::Code);
-    MapSegment(module_->rodata, VMAPermission::Read, MemoryState::Static);
-    MapSegment(module_->data, VMAPermission::ReadWrite, MemoryState::Static);
+    MapSegment(module_->code, VMAPermission::ReadExecute, MemoryState::CodeStatic);
+    MapSegment(module_->rodata, VMAPermission::Read, MemoryState::CodeMutable);
+    MapSegment(module_->data, VMAPermission::ReadWrite, MemoryState::CodeMutable);
 }
 
 VAddr Process::GetLinearHeapAreaAddress() const {
@@ -184,6 +184,8 @@ ResultVal<VAddr> Process::HeapAllocate(VAddr target, u64 size, VMAPermission per
         // Initialize heap
         heap_memory = std::make_shared<std::vector<u8>>();
         heap_start = heap_end = target;
+    } else {
+        vm_manager.UnmapRange(heap_start, heap_end - heap_start);
     }
 
     // If necessary, expand backing vector to cover new heap extents.
@@ -203,7 +205,7 @@ ResultVal<VAddr> Process::HeapAllocate(VAddr target, u64 size, VMAPermission per
                                                        size, MemoryState::Heap));
     vm_manager.Reprotect(vma, perms);
 
-    heap_used += size;
+    heap_used = size;
     memory_region->used += size;
 
     return MakeResult<VAddr>(heap_end - size);
@@ -290,7 +292,7 @@ ResultCode Process::MirrorMemory(VAddr dst_addr, VAddr src_addr, u64 size) {
 
     CASCADE_RESULT(auto new_vma,
                    vm_manager.MapMemoryBlock(dst_addr, backing_block, backing_block_offset, size,
-                                             vma->second.meminfo_state));
+                                             MemoryState::Mapped));
     // Protect mirror with permissions from old region
     vm_manager.Reprotect(new_vma, vma->second.permissions);
     // Remove permissions from old region
@@ -321,5 +323,4 @@ SharedPtr<Process> GetProcessById(u32 process_id) {
     return *itr;
 }
 
-SharedPtr<Process> g_current_process;
 } // namespace Kernel

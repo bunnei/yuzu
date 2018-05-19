@@ -13,9 +13,15 @@ ConfigureGeneral::ConfigureGeneral(QWidget* parent)
 
     ui->setupUi(this);
 
+    for (auto theme : UISettings::themes) {
+        ui->theme_combobox->addItem(theme.first, theme.second);
+    }
+
     this->setConfiguration();
 
-    ui->cpu_core_combobox->setEnabled(!Core::System::GetInstance().IsPoweredOn());
+    ui->use_cpu_jit->setEnabled(!Core::System::GetInstance().IsPoweredOn());
+    ui->use_multi_core->setEnabled(!Core::System::GetInstance().IsPoweredOn());
+    ui->use_docked_mode->setEnabled(!Core::System::GetInstance().IsPoweredOn());
 }
 
 ConfigureGeneral::~ConfigureGeneral() {}
@@ -23,13 +29,20 @@ ConfigureGeneral::~ConfigureGeneral() {}
 void ConfigureGeneral::setConfiguration() {
     ui->toggle_deepscan->setChecked(UISettings::values.gamedir_deepscan);
     ui->toggle_check_exit->setChecked(UISettings::values.confirm_before_closing);
-    ui->cpu_core_combobox->setCurrentIndex(static_cast<int>(Settings::values.cpu_core));
+    ui->theme_combobox->setCurrentIndex(ui->theme_combobox->findData(UISettings::values.theme));
+    ui->use_cpu_jit->setChecked(Settings::values.use_cpu_jit);
+    ui->use_multi_core->setChecked(Settings::values.use_multi_core);
+    ui->use_docked_mode->setChecked(Settings::values.use_docked_mode);
 }
 
 void ConfigureGeneral::applyConfiguration() {
     UISettings::values.gamedir_deepscan = ui->toggle_deepscan->isChecked();
     UISettings::values.confirm_before_closing = ui->toggle_check_exit->isChecked();
-    Settings::values.cpu_core =
-        static_cast<Settings::CpuCore>(ui->cpu_core_combobox->currentIndex());
+    UISettings::values.theme =
+        ui->theme_combobox->itemData(ui->theme_combobox->currentIndex()).toString();
+
+    Settings::values.use_cpu_jit = ui->use_cpu_jit->isChecked();
+    Settings::values.use_multi_core = ui->use_multi_core->isChecked();
+    Settings::values.use_docked_mode = ui->use_docked_mode->isChecked();
     Settings::Apply();
 }

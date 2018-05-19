@@ -15,6 +15,8 @@ class RendererBase;
 
 namespace VideoCore {
 
+enum class Renderer { Software, OpenGL };
+
 extern std::unique_ptr<RendererBase> g_renderer; ///< Renderer plugin
 extern EmuWindow* g_emu_window;                  ///< Emu window
 
@@ -31,4 +33,4 @@ bool Init(EmuWindow* emu_window);
 /// Shutdown the video core
 void Shutdown();
 
-} // namespace
+} // namespace VideoCore

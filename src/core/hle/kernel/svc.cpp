@@ -3,14 +3,16 @@
 // Refer to the license.txt file included.
 
 #include <algorithm>
+#include <cinttypes>
+#include <iterator>
 
 #include "common/logging/log.h"
 #include "common/microprofile.h"
 #include "common/string_util.h"
+#include "core/core.h"
 #include "core/core_timing.h"
 #include "core/hle/kernel/client_port.h"
 #include "core/hle/kernel/client_session.h"
-#include "core/hle/kernel/condition_variable.h"
 #include "core/hle/kernel/event.h"
 #include "core/hle/kernel/handle_table.h"
 #include "core/hle/kernel/mutex.h"
@@ -20,7 +22,6 @@
 #include "core/hle/kernel/shared_memory.h"
 #include "core/hle/kernel/svc.h"
 #include "core/hle/kernel/svc_wrap.h"
-#include "core/hle/kernel/sync_object.h"
 #include "core/hle/kernel/thread.h"
 #include "core/hle/lock.h"
 #include "core/hle/result.h"
@@ -30,34 +31,34 @@ namespace Kernel {
 
 /// Set the process heap to a given Size. It can both extend and shrink the heap.
 static ResultCode SetHeapSize(VAddr* heap_addr, u64 heap_size) {
-    LOG_TRACE(Kernel_SVC, "called, heap_size=0x%llx", heap_size);
-    auto& process = *g_current_process;
+    NGLOG_TRACE(Kernel_SVC, "called, heap_size=0x{:X}", heap_size);
+    auto& process = *Core::CurrentProcess();
     CASCADE_RESULT(*heap_addr,
                    process.HeapAllocate(Memory::HEAP_VADDR, heap_size, VMAPermission::ReadWrite));
     return RESULT_SUCCESS;
 }
 
 static ResultCode SetMemoryAttribute(VAddr addr, u64 size, u32 state0, u32 state1) {
-    LOG_WARNING(Kernel_SVC, "(STUBBED) called, addr=0x%llx", addr);
+    NGLOG_WARNING(Kernel_SVC, "(STUBBED) called, addr=0x{:X}", addr);
     return RESULT_SUCCESS;
 }
 
 /// Maps a memory range into a different range.
 static ResultCode MapMemory(VAddr dst_addr, VAddr src_addr, u64 size) {
-    LOG_TRACE(Kernel_SVC, "called, dst_addr=0x%llx, src_addr=0x%llx, size=0x%llx", dst_addr,
-              src_addr, size);
-    return g_current_process->MirrorMemory(dst_addr, src_addr, size);
+    NGLOG_TRACE(Kernel_SVC, "called, dst_addr=0x{:X}, src_addr=0x{:X}, size=0x{:X}", dst_addr,
+                src_addr, size);
+    return Core::CurrentProcess()->MirrorMemory(dst_addr, src_addr, size);
 }
 
 /// Unmaps a region that was previously mapped with svcMapMemory
 static ResultCode UnmapMemory(VAddr dst_addr, VAddr src_addr, u64 size) {
-    LOG_TRACE(Kernel_SVC, "called, dst_addr=0x%llx, src_addr=0x%llx, size=0x%llx", dst_addr,
-              src_addr, size);
-    return g_current_process->UnmapMemory(dst_addr, src_addr, size);
+    NGLOG_TRACE(Kernel_SVC, "called, dst_addr=0x{:X}, src_addr=0x{:X}, size=0x{:X}", dst_addr,
+                src_addr, size);
+    return Core::CurrentProcess()->UnmapMemory(dst_addr, src_addr, size);
 }
 
 /// Connect to an OS service given the port name, returns the handle to the port to out
-static ResultCode ConnectToPort(Handle* out_handle, VAddr port_name_address) {
+static ResultCode ConnectToNamedPort(Handle* out_handle, VAddr port_name_address) {
     if (!Memory::IsValidVirtualAddress(port_name_address))
         return ERR_NOT_FOUND;
 
@@ -67,11 +68,11 @@ static ResultCode ConnectToPort(Handle* out_handle, VAddr port_name_address) {
     if (port_name.size() > PortNameMaxLength)
         return ERR_PORT_NAME_TOO_LONG;
 
-    LOG_TRACE(Kernel_SVC, "called port_name=%s", port_name.c_str());
+    NGLOG_TRACE(Kernel_SVC, "called port_name={}", port_name);
 
     auto it = Service::g_kernel_named_ports.find(port_name);
     if (it == Service::g_kernel_named_ports.end()) {
-        LOG_WARNING(Kernel_SVC, "tried to connect to unknown port: %s", port_name.c_str());
+        NGLOG_WARNING(Kernel_SVC, "tried to connect to unknown port: {}", port_name);
         return ERR_NOT_FOUND;
     }
 
@@ -87,13 +88,13 @@ static ResultCode ConnectToPort(Handle* out_handle, VAddr port_name_address) {
 
 /// Makes a blocking IPC call to an OS service.
 static ResultCode SendSyncRequest(Handle handle) {
-    SharedPtr<SyncObject> session = g_handle_table.Get<SyncObject>(handle);
+    SharedPtr<ClientSession> session = g_handle_table.Get<ClientSession>(handle);
     if (!session) {
-        LOG_ERROR(Kernel_SVC, "called with invalid handle=0x%08X", handle);
+        NGLOG_ERROR(Kernel_SVC, "called with invalid handle=0x{:08X}", handle);
         return ERR_INVALID_HANDLE;
     }
 
-    LOG_TRACE(Kernel_SVC, "called handle=0x%08X(%s)", handle, session->GetName().c_str());
+    NGLOG_TRACE(Kernel_SVC, "called handle=0x{:08X}({})", handle, session->GetName());
 
     Core::System::GetInstance().PrepareReschedule();
 
@@ -104,7 +105,7 @@ static ResultCode SendSyncRequest(Handle handle) {
 
 /// Get the ID for the specified thread.
 static ResultCode GetThreadId(u32* thread_id, Handle thread_handle) {
-    LOG_TRACE(Kernel_SVC, "called thread=0x%08X", thread_handle);
+    NGLOG_TRACE(Kernel_SVC, "called thread=0x{:08X}", thread_handle);
 
     const SharedPtr<Thread> thread = g_handle_table.Get<Thread>(thread_handle);
     if (!thread) {
@@ -117,7 +118,7 @@ static ResultCode GetThreadId(u32* thread_id, Handle thread_handle) {
 
 /// Get the ID of the specified process
 static ResultCode GetProcessId(u32* process_id, Handle process_handle) {
-    LOG_TRACE(Kernel_SVC, "called process=0x%08X", process_handle);
+    NGLOG_TRACE(Kernel_SVC, "called process=0x{:08X}", process_handle);
 
     const SharedPtr<Process> process = g_handle_table.Get<Process>(process_handle);
     if (!process) {
@@ -177,8 +178,8 @@ static ResultCode WaitSynchronization1(
 /// Wait for the given handles to synchronize, timeout after the specified nanoseconds
 static ResultCode WaitSynchronization(Handle* index, VAddr handles_address, u64 handle_count,
                                       s64 nano_seconds) {
-    LOG_TRACE(Kernel_SVC, "called handles_address=0x%llx, handle_count=%d, nano_seconds=%d",
-              handles_address, handle_count, nano_seconds);
+    NGLOG_TRACE(Kernel_SVC, "called handles_address=0x{:X}, handle_count={}, nano_seconds={}",
+                handles_address, handle_count, nano_seconds);
 
     if (!Memory::IsValidVirtualAddress(handles_address))
         return ERR_INVALID_POINTER;
@@ -238,7 +239,7 @@ static ResultCode WaitSynchronization(Handle* index, VAddr handles_address, u64 
 
 /// Resumes a thread waiting on WaitSynchronization
 static ResultCode CancelSynchronization(Handle thread_handle) {
-    LOG_TRACE(Kernel_SVC, "called thread=0x%08X", thread_handle);
+    NGLOG_TRACE(Kernel_SVC, "called thread=0x{:X}", thread_handle);
 
     const SharedPtr<Thread> thread = g_handle_table.Get<Thread>(thread_handle);
     if (!thread) {
@@ -253,70 +254,70 @@ static ResultCode CancelSynchronization(Handle thread_handle) {
 }
 
 /// Attempts to locks a mutex, creating it if it does not already exist
-static ResultCode LockMutex(Handle holding_thread_handle, VAddr mutex_addr,
-                            Handle requesting_thread_handle) {
-    LOG_TRACE(Kernel_SVC, "called holding_thread_handle=0x%08X, mutex_addr=0x%llx, "
-                          "requesting_current_thread_handle=0x%08X",
-              holding_thread_handle, mutex_addr, requesting_thread_handle);
+static ResultCode ArbitrateLock(Handle holding_thread_handle, VAddr mutex_addr,
+                                Handle requesting_thread_handle) {
+    NGLOG_TRACE(Kernel_SVC,
+                "called holding_thread_handle=0x{:08X}, mutex_addr=0x{:X}, "
+                "requesting_current_thread_handle=0x{:08X}",
+                holding_thread_handle, mutex_addr, requesting_thread_handle);
 
-    SharedPtr<Thread> holding_thread = g_handle_table.Get<Thread>(holding_thread_handle);
-    SharedPtr<Thread> requesting_thread = g_handle_table.Get<Thread>(requesting_thread_handle);
-
-    ASSERT(requesting_thread);
-
-    SharedPtr<Mutex> mutex = g_object_address_table.Get<Mutex>(mutex_addr);
-    if (!mutex) {
-        // Create a new mutex for the specified address if one does not already exist
-        mutex = Mutex::Create(holding_thread, mutex_addr);
-        mutex->name = Common::StringFromFormat("mutex-%llx", mutex_addr);
-    }
-
-    ASSERT(holding_thread == mutex->GetHoldingThread());
-
-    return WaitSynchronization1(mutex, requesting_thread.get());
+    return Mutex::TryAcquire(mutex_addr, holding_thread_handle, requesting_thread_handle);
 }
 
 /// Unlock a mutex
-static ResultCode UnlockMutex(VAddr mutex_addr) {
-    LOG_TRACE(Kernel_SVC, "called mutex_addr=0x%llx", mutex_addr);
+static ResultCode ArbitrateUnlock(VAddr mutex_addr) {
+    NGLOG_TRACE(Kernel_SVC, "called mutex_addr=0x{:X}", mutex_addr);
 
-    SharedPtr<Mutex> mutex = g_object_address_table.Get<Mutex>(mutex_addr);
-    ASSERT(mutex);
-
-    return mutex->Release(GetCurrentThread());
+    return Mutex::Release(mutex_addr);
 }
 
 /// Break program execution
 static void Break(u64 unk_0, u64 unk_1, u64 unk_2) {
-    LOG_CRITICAL(Debug_Emulated, "Emulated program broke execution!");
+    NGLOG_CRITICAL(Debug_Emulated, "Emulated program broke execution!");
     ASSERT(false);
 }
 
 /// Used to output a message on a debug hardware unit - does nothing on a retail unit
 static void OutputDebugString(VAddr address, s32 len) {
-    std::vector<char> string(len);
-    Memory::ReadBlock(address, string.data(), len);
-    LOG_DEBUG(Debug_Emulated, "%.*s", len, string.data());
+    std::string str(len, '\0');
+    Memory::ReadBlock(address, str.data(), str.size());
+    NGLOG_DEBUG(Debug_Emulated, "{}", str);
 }
 
 /// Gets system/memory information for the current process
 static ResultCode GetInfo(u64* result, u64 info_id, u64 handle, u64 info_sub_id) {
-    LOG_TRACE(Kernel_SVC, "called info_id=0x%X, info_sub_id=0x%X, handle=0x%08X", info_id,
-              info_sub_id, handle);
+    NGLOG_TRACE(Kernel_SVC, "called info_id=0x{:X}, info_sub_id=0x{:X}, handle=0x{:08X}", info_id,
+                info_sub_id, handle);
 
-    ASSERT(handle == 0 || handle == CurrentProcess);
-
-    auto& vm_manager = g_current_process->vm_manager;
+    auto& vm_manager = Core::CurrentProcess()->vm_manager;
 
     switch (static_cast<GetInfoType>(info_id)) {
     case GetInfoType::AllowedCpuIdBitmask:
-        *result = g_current_process->allowed_processor_mask;
+        *result = Core::CurrentProcess()->allowed_processor_mask;
+        break;
+    case GetInfoType::AllowedThreadPrioBitmask:
+        *result = Core::CurrentProcess()->allowed_thread_priority_mask;
+        break;
+    case GetInfoType::MapRegionBaseAddr:
+        *result = Memory::MAP_REGION_VADDR;
+        break;
+    case GetInfoType::MapRegionSize:
+        *result = Memory::MAP_REGION_SIZE;
+        break;
+    case GetInfoType::HeapRegionBaseAddr:
+        *result = Memory::HEAP_VADDR;
+        break;
+    case GetInfoType::HeapRegionSize:
+        *result = Memory::HEAP_SIZE;
         break;
     case GetInfoType::TotalMemoryUsage:
         *result = vm_manager.GetTotalMemoryUsage();
         break;
     case GetInfoType::TotalHeapUsage:
         *result = vm_manager.GetTotalHeapUsage();
+        break;
+    case GetInfoType::IsCurrentProcessBeingDebugged:
+        *result = 0;
         break;
     case GetInfoType::RandomEntropy:
         *result = 0;
@@ -328,15 +329,40 @@ static ResultCode GetInfo(u64* result, u64 info_id, u64 handle, u64 info_sub_id)
         *result = vm_manager.GetAddressSpaceSize();
         break;
     case GetInfoType::NewMapRegionBaseAddr:
-        *result = vm_manager.GetNewMapRegionBaseAddr();
+        *result = Memory::NEW_MAP_REGION_VADDR;
         break;
     case GetInfoType::NewMapRegionSize:
-        *result = vm_manager.GetNewMapRegionSize();
+        *result = Memory::NEW_MAP_REGION_SIZE;
+        break;
+    case GetInfoType::IsVirtualAddressMemoryEnabled:
+        *result = Core::CurrentProcess()->is_virtual_address_memory_enabled;
+        break;
+    case GetInfoType::TitleId:
+        NGLOG_WARNING(Kernel_SVC, "(STUBBED) Attempted to query titleid, returned 0");
+        *result = 0;
+        break;
+    case GetInfoType::PrivilegedProcessId:
+        NGLOG_WARNING(Kernel_SVC,
+                      "(STUBBED) Attempted to query privileged process id bounds, returned 0");
+        *result = 0;
         break;
     default:
         UNIMPLEMENTED();
     }
 
+    return RESULT_SUCCESS;
+}
+
+/// Sets the thread activity
+static ResultCode SetThreadActivity(Handle handle, u32 unknown) {
+    NGLOG_WARNING(Kernel_SVC, "(STUBBED) called, handle=0x{:08X}, unknown=0x{:08X}", handle,
+                  unknown);
+    return RESULT_SUCCESS;
+}
+
+/// Gets the thread context
+static ResultCode GetThreadContext(Handle handle, VAddr addr) {
+    NGLOG_WARNING(Kernel_SVC, "(STUBBED) called, handle=0x{:08X}, addr=0x{:X}", handle, addr);
     return RESULT_SUCCESS;
 }
 
@@ -362,17 +388,12 @@ static ResultCode SetThreadPriority(Handle handle, u32 priority) {
 
     // Note: The kernel uses the current process's resource limit instead of
     // the one from the thread owner's resource limit.
-    SharedPtr<ResourceLimit>& resource_limit = g_current_process->resource_limit;
-    if (resource_limit->GetMaxResourceValue(ResourceTypes::PRIORITY) > priority) {
+    SharedPtr<ResourceLimit>& resource_limit = Core::CurrentProcess()->resource_limit;
+    if (resource_limit->GetMaxResourceValue(ResourceType::Priority) > priority) {
         return ERR_NOT_AUTHORIZED;
     }
 
     thread->SetPriority(priority);
-    thread->UpdatePriority();
-
-    // Update the mutexes that this thread is waiting for
-    for (auto& mutex : thread->pending_mutexes)
-        mutex->UpdatePriority();
 
     Core::System::GetInstance().PrepareReschedule();
     return RESULT_SUCCESS;
@@ -380,18 +401,18 @@ static ResultCode SetThreadPriority(Handle handle, u32 priority) {
 
 /// Get which CPU core is executing the current thread
 static u32 GetCurrentProcessorNumber() {
-    LOG_WARNING(Kernel_SVC, "(STUBBED) called, defaulting to processor 0");
-    return 0;
+    NGLOG_TRACE(Kernel_SVC, "called");
+    return GetCurrentThread()->processor_id;
 }
 
 static ResultCode MapSharedMemory(Handle shared_memory_handle, VAddr addr, u64 size,
                                   u32 permissions) {
-    LOG_TRACE(Kernel_SVC,
-              "called, shared_memory_handle=0x%08X, addr=0x%llx, size=0x%llx, permissions=0x%08X",
-              shared_memory_handle, addr, size, permissions);
+    NGLOG_TRACE(
+        Kernel_SVC,
+        "called, shared_memory_handle=0x{:X}, addr=0x{:X}, size=0x{:X}, permissions=0x{:08X}",
+        shared_memory_handle, addr, size, permissions);
 
-    SharedPtr<SharedMemory> shared_memory =
-        Kernel::g_handle_table.Get<SharedMemory>(shared_memory_handle);
+    SharedPtr<SharedMemory> shared_memory = g_handle_table.Get<SharedMemory>(shared_memory_handle);
     if (!shared_memory) {
         return ERR_INVALID_HANDLE;
     }
@@ -406,13 +427,22 @@ static ResultCode MapSharedMemory(Handle shared_memory_handle, VAddr addr, u64 s
     case MemoryPermission::WriteExecute:
     case MemoryPermission::ReadWriteExecute:
     case MemoryPermission::DontCare:
-        return shared_memory->Map(Kernel::g_current_process.get(), addr, permissions_type,
+        return shared_memory->Map(Core::CurrentProcess().get(), addr, permissions_type,
                                   MemoryPermission::DontCare);
     default:
-        LOG_ERROR(Kernel_SVC, "unknown permissions=0x%08X", permissions);
+        NGLOG_ERROR(Kernel_SVC, "unknown permissions=0x{:08X}", permissions);
     }
 
     return RESULT_SUCCESS;
+}
+
+static ResultCode UnmapSharedMemory(Handle shared_memory_handle, VAddr addr, u64 size) {
+    NGLOG_WARNING(Kernel_SVC, "called, shared_memory_handle=0x{:08X}, addr=0x{:X}, size=0x{:X}",
+                  shared_memory_handle, addr, size);
+
+    SharedPtr<SharedMemory> shared_memory = g_handle_table.Get<SharedMemory>(shared_memory_handle);
+
+    return shared_memory->Unmap(Core::CurrentProcess().get(), addr);
 }
 
 /// Query process memory
@@ -424,11 +454,11 @@ static ResultCode QueryProcessMemory(MemoryInfo* memory_info, PageInfo* /*page_i
     }
     auto vma = process->vm_manager.FindVMA(addr);
     memory_info->attributes = 0;
-    if (vma == g_current_process->vm_manager.vma_map.end()) {
+    if (vma == Core::CurrentProcess()->vm_manager.vma_map.end()) {
         memory_info->base_address = 0;
         memory_info->permission = static_cast<u32>(VMAPermission::None);
         memory_info->size = 0;
-        memory_info->type = static_cast<u32>(MemoryState::Free);
+        memory_info->type = static_cast<u32>(MemoryState::Unmapped);
     } else {
         memory_info->base_address = vma->second.base;
         memory_info->permission = static_cast<u32>(vma->second.permissions);
@@ -436,40 +466,47 @@ static ResultCode QueryProcessMemory(MemoryInfo* memory_info, PageInfo* /*page_i
         memory_info->type = static_cast<u32>(vma->second.meminfo_state);
     }
 
-    LOG_TRACE(Kernel_SVC, "called process=0x%08X addr=%llx", process_handle, addr);
+    NGLOG_TRACE(Kernel_SVC, "called process=0x{:08X} addr={:X}", process_handle, addr);
     return RESULT_SUCCESS;
 }
 
 /// Query memory
 static ResultCode QueryMemory(MemoryInfo* memory_info, PageInfo* page_info, VAddr addr) {
-    LOG_TRACE(Kernel_SVC, "called, addr=%llx", addr);
+    NGLOG_TRACE(Kernel_SVC, "called, addr={:X}", addr);
     return QueryProcessMemory(memory_info, page_info, CurrentProcess, addr);
 }
 
 /// Exits the current process
 static void ExitProcess() {
-    LOG_INFO(Kernel_SVC, "Process %u exiting", g_current_process->process_id);
+    NGLOG_INFO(Kernel_SVC, "Process {} exiting", Core::CurrentProcess()->process_id);
 
-    ASSERT_MSG(g_current_process->status == ProcessStatus::Running, "Process has already exited");
+    ASSERT_MSG(Core::CurrentProcess()->status == ProcessStatus::Running,
+               "Process has already exited");
 
-    g_current_process->status = ProcessStatus::Exited;
+    Core::CurrentProcess()->status = ProcessStatus::Exited;
 
-    // Stop all the process threads that are currently waiting for objects.
-    auto& thread_list = GetThreadList();
-    for (auto& thread : thread_list) {
-        if (thread->owner_process != g_current_process)
-            continue;
+    auto stop_threads = [](const std::vector<SharedPtr<Thread>>& thread_list) {
+        for (auto& thread : thread_list) {
+            if (thread->owner_process != Core::CurrentProcess())
+                continue;
 
-        if (thread == GetCurrentThread())
-            continue;
+            if (thread == GetCurrentThread())
+                continue;
 
-        // TODO(Subv): When are the other running/ready threads terminated?
-        ASSERT_MSG(thread->status == THREADSTATUS_WAIT_SYNCH_ANY ||
-                       thread->status == THREADSTATUS_WAIT_SYNCH_ALL,
-                   "Exiting processes with non-waiting threads is currently unimplemented");
+            // TODO(Subv): When are the other running/ready threads terminated?
+            ASSERT_MSG(thread->status == THREADSTATUS_WAIT_SYNCH_ANY ||
+                           thread->status == THREADSTATUS_WAIT_SYNCH_ALL,
+                       "Exiting processes with non-waiting threads is currently unimplemented");
 
-        thread->Stop();
-    }
+            thread->Stop();
+        }
+    };
+
+    auto& system = Core::System::GetInstance();
+    stop_threads(system.Scheduler(0)->GetThreadList());
+    stop_threads(system.Scheduler(1)->GetThreadList());
+    stop_threads(system.Scheduler(2)->GetThreadList());
+    stop_threads(system.Scheduler(3)->GetThreadList());
 
     // Kill the current thread
     GetCurrentThread()->Stop();
@@ -480,57 +517,53 @@ static void ExitProcess() {
 /// Creates a new thread
 static ResultCode CreateThread(Handle* out_handle, VAddr entry_point, u64 arg, VAddr stack_top,
                                u32 priority, s32 processor_id) {
-    std::string name = Common::StringFromFormat("unknown-%llx", entry_point);
+    std::string name = fmt::format("unknown-{:X}", entry_point);
 
     if (priority > THREADPRIO_LOWEST) {
         return ERR_OUT_OF_RANGE;
     }
 
-    SharedPtr<ResourceLimit>& resource_limit = g_current_process->resource_limit;
-    if (resource_limit->GetMaxResourceValue(ResourceTypes::PRIORITY) > priority) {
+    SharedPtr<ResourceLimit>& resource_limit = Core::CurrentProcess()->resource_limit;
+    if (resource_limit->GetMaxResourceValue(ResourceType::Priority) > priority) {
         return ERR_NOT_AUTHORIZED;
     }
 
     if (processor_id == THREADPROCESSORID_DEFAULT) {
         // Set the target CPU to the one specified in the process' exheader.
-        processor_id = g_current_process->ideal_processor;
+        processor_id = Core::CurrentProcess()->ideal_processor;
         ASSERT(processor_id != THREADPROCESSORID_DEFAULT);
     }
 
     switch (processor_id) {
     case THREADPROCESSORID_0:
-        break;
     case THREADPROCESSORID_1:
     case THREADPROCESSORID_2:
     case THREADPROCESSORID_3:
-        // TODO(bunnei): Implement support for other processor IDs
-        LOG_ERROR(Kernel_SVC,
-                  "Newly created thread must run in another thread (%u), unimplemented.",
-                  processor_id);
         break;
     default:
-        ASSERT_MSG(false, "Unsupported thread processor ID: %d", processor_id);
+        ASSERT_MSG(false, "Unsupported thread processor ID: {}", processor_id);
         break;
     }
 
     CASCADE_RESULT(SharedPtr<Thread> thread,
                    Thread::Create(name, entry_point, priority, arg, processor_id, stack_top,
-                                  g_current_process));
+                                  Core::CurrentProcess()));
     CASCADE_RESULT(thread->guest_handle, g_handle_table.Create(thread));
     *out_handle = thread->guest_handle;
 
     Core::System::GetInstance().PrepareReschedule();
 
-    LOG_TRACE(Kernel_SVC, "called entrypoint=0x%08X (%s), arg=0x%08X, stacktop=0x%08X, "
-                          "threadpriority=0x%08X, processorid=0x%08X : created handle=0x%08X",
-              entry_point, name.c_str(), arg, stack_top, priority, processor_id, *out_handle);
+    NGLOG_TRACE(Kernel_SVC,
+                "called entrypoint=0x{:08X} ({}), arg=0x{:08X}, stacktop=0x{:08X}, "
+                "threadpriority=0x{:08X}, processorid=0x{:08X} : created handle=0x{:08X}",
+                entry_point, name, arg, stack_top, priority, processor_id, *out_handle);
 
     return RESULT_SUCCESS;
 }
 
 /// Starts the thread for the provided handle
 static ResultCode StartThread(Handle thread_handle) {
-    LOG_TRACE(Kernel_SVC, "called thread=0x%08X", thread_handle);
+    NGLOG_TRACE(Kernel_SVC, "called thread=0x{:08X}", thread_handle);
 
     const SharedPtr<Thread> thread = g_handle_table.Get<Thread>(thread_handle);
     if (!thread) {
@@ -544,7 +577,7 @@ static ResultCode StartThread(Handle thread_handle) {
 
 /// Called when a thread exits
 static void ExitThread() {
-    LOG_TRACE(Kernel_SVC, "called, pc=0x%08X", Core::CPU().GetPC());
+    NGLOG_TRACE(Kernel_SVC, "called, pc=0x{:08X}", Core::CurrentArmInterface().GetPC());
 
     ExitCurrentThread();
     Core::System::GetInstance().PrepareReschedule();
@@ -552,11 +585,11 @@ static void ExitThread() {
 
 /// Sleep the current thread
 static void SleepThread(s64 nanoseconds) {
-    LOG_TRACE(Kernel_SVC, "called nanoseconds=%lld", nanoseconds);
+    NGLOG_TRACE(Kernel_SVC, "called nanoseconds={}", nanoseconds);
 
     // Don't attempt to yield execution if there are no available threads to run,
     // this way we avoid a useless reschedule to the idle thread.
-    if (nanoseconds == 0 && !HaveReadyThreads())
+    if (nanoseconds == 0 && !Core::System::GetInstance().CurrentScheduler().HaveReadyThreads())
         return;
 
     // Sleep current thread and check for next thread to schedule
@@ -571,105 +604,91 @@ static void SleepThread(s64 nanoseconds) {
 /// Signal process wide key atomic
 static ResultCode WaitProcessWideKeyAtomic(VAddr mutex_addr, VAddr condition_variable_addr,
                                            Handle thread_handle, s64 nano_seconds) {
-    LOG_TRACE(
+    NGLOG_TRACE(
         Kernel_SVC,
-        "called mutex_addr=%llx, condition_variable_addr=%llx, thread_handle=0x%08X, timeout=%d",
+        "called mutex_addr={:X}, condition_variable_addr={:X}, thread_handle=0x{:08X}, timeout={}",
         mutex_addr, condition_variable_addr, thread_handle, nano_seconds);
 
     SharedPtr<Thread> thread = g_handle_table.Get<Thread>(thread_handle);
     ASSERT(thread);
 
-    SharedPtr<Mutex> mutex = g_object_address_table.Get<Mutex>(mutex_addr);
-    if (!mutex) {
-        // Create a new mutex for the specified address if one does not already exist
-        mutex = Mutex::Create(thread, mutex_addr);
-        mutex->name = Common::StringFromFormat("mutex-%llx", mutex_addr);
-    }
+    CASCADE_CODE(Mutex::Release(mutex_addr));
 
-    ASSERT(mutex->GetOwnerHandle() == thread_handle);
+    SharedPtr<Thread> current_thread = GetCurrentThread();
+    current_thread->condvar_wait_address = condition_variable_addr;
+    current_thread->mutex_wait_address = mutex_addr;
+    current_thread->wait_handle = thread_handle;
+    current_thread->status = THREADSTATUS_WAIT_MUTEX;
+    current_thread->wakeup_callback = nullptr;
 
-    SharedPtr<ConditionVariable> condition_variable =
-        g_object_address_table.Get<ConditionVariable>(condition_variable_addr);
-    if (!condition_variable) {
-        // Create a new condition_variable for the specified address if one does not already exist
-        condition_variable =
-            ConditionVariable::Create(condition_variable_addr, mutex_addr).Unwrap();
-        condition_variable->name =
-            Common::StringFromFormat("condition-variable-%llx", condition_variable_addr);
-    }
+    current_thread->WakeAfterDelay(nano_seconds);
 
-    ASSERT(condition_variable->GetAvailableCount() == 0);
-    ASSERT(condition_variable->mutex_addr == mutex_addr);
+    // Note: Deliberately don't attempt to inherit the lock owner's priority.
 
-    auto wakeup_callback = [mutex, nano_seconds](ThreadWakeupReason reason,
-                                                 SharedPtr<Thread> thread,
-                                                 SharedPtr<WaitObject> object, size_t index) {
-        ASSERT(thread->status == THREADSTATUS_WAIT_SYNCH_ANY);
-
-        if (reason == ThreadWakeupReason::Timeout) {
-            thread->SetWaitSynchronizationResult(RESULT_TIMEOUT);
-            return true;
-        }
-
-        ASSERT(reason == ThreadWakeupReason::Signal);
-
-        // Now try to acquire the mutex and don't resume if it's not available.
-        if (!mutex->ShouldWait(thread.get())) {
-            mutex->Acquire(thread.get());
-            thread->SetWaitSynchronizationResult(RESULT_SUCCESS);
-            return true;
-        }
-
-        if (nano_seconds == 0) {
-            thread->SetWaitSynchronizationResult(RESULT_TIMEOUT);
-            return true;
-        }
-
-        thread->wait_objects = {mutex};
-        mutex->AddWaitingThread(thread);
-        thread->status = THREADSTATUS_WAIT_SYNCH_ANY;
-
-        // Create an event to wake the thread up after the
-        // specified nanosecond delay has passed
-        thread->WakeAfterDelay(nano_seconds);
-        thread->wakeup_callback = DefaultThreadWakeupCallback;
-
-        Core::System::GetInstance().PrepareReschedule();
-
-        return false;
-    };
-    CASCADE_CODE(
-        WaitSynchronization1(condition_variable, thread.get(), nano_seconds, wakeup_callback));
-
-    mutex->Release(thread.get());
-
+    Core::System::GetInstance().CpuCore(current_thread->processor_id).PrepareReschedule();
     return RESULT_SUCCESS;
 }
 
 /// Signal process wide key
 static ResultCode SignalProcessWideKey(VAddr condition_variable_addr, s32 target) {
-    LOG_TRACE(Kernel_SVC, "called, condition_variable_addr=0x%llx, target=0x%08x",
-              condition_variable_addr, target);
+    NGLOG_TRACE(Kernel_SVC, "called, condition_variable_addr=0x{:X}, target=0x{:08X}",
+                condition_variable_addr, target);
 
-    // Wakeup all or one thread - Any other value is unimplemented
-    ASSERT(target == -1 || target == 1);
+    u32 processed = 0;
 
-    SharedPtr<ConditionVariable> condition_variable =
-        g_object_address_table.Get<ConditionVariable>(condition_variable_addr);
-    if (!condition_variable) {
-        // Create a new condition_variable for the specified address if one does not already exist
-        condition_variable = ConditionVariable::Create(condition_variable_addr).Unwrap();
-        condition_variable->name =
-            Common::StringFromFormat("condition-variable-%llx", condition_variable_addr);
-    }
+    auto signal_process_wide_key = [&](size_t core_index) {
+        const auto& scheduler = Core::System::GetInstance().Scheduler(core_index);
+        for (auto& thread : scheduler->GetThreadList()) {
+            if (thread->condvar_wait_address != condition_variable_addr)
+                continue;
 
-    CASCADE_CODE(condition_variable->Release(target));
+            // Only process up to 'target' threads, unless 'target' is -1, in which case process
+            // them all.
+            if (target != -1 && processed >= target)
+                break;
 
-    if (condition_variable->mutex_addr) {
-        // If a mutex was created for this condition_variable, wait the current thread on it
-        SharedPtr<Mutex> mutex = g_object_address_table.Get<Mutex>(condition_variable->mutex_addr);
-        return WaitSynchronization1(mutex, GetCurrentThread());
-    }
+            // If the mutex is not yet acquired, acquire it.
+            u32 mutex_val = Memory::Read32(thread->mutex_wait_address);
+
+            if (mutex_val == 0) {
+                // We were able to acquire the mutex, resume this thread.
+                Memory::Write32(thread->mutex_wait_address, thread->wait_handle);
+                ASSERT(thread->status == THREADSTATUS_WAIT_MUTEX);
+                thread->ResumeFromWait();
+
+                auto lock_owner = thread->lock_owner;
+                if (lock_owner)
+                    lock_owner->RemoveMutexWaiter(thread);
+
+                thread->lock_owner = nullptr;
+                thread->mutex_wait_address = 0;
+                thread->condvar_wait_address = 0;
+                thread->wait_handle = 0;
+            } else {
+                // Couldn't acquire the mutex, block the thread.
+                Handle owner_handle = static_cast<Handle>(mutex_val & Mutex::MutexOwnerMask);
+                auto owner = g_handle_table.Get<Thread>(owner_handle);
+                ASSERT(owner);
+                ASSERT(thread->status != THREADSTATUS_RUNNING);
+                thread->status = THREADSTATUS_WAIT_MUTEX;
+                thread->wakeup_callback = nullptr;
+
+                // Signal that the mutex now has a waiting thread.
+                Memory::Write32(thread->mutex_wait_address, mutex_val | Mutex::MutexHasWaitersFlag);
+
+                owner->AddMutexWaiter(thread);
+
+                Core::System::GetInstance().CpuCore(thread->processor_id).PrepareReschedule();
+            }
+
+            ++processed;
+        }
+    };
+
+    signal_process_wide_key(0);
+    signal_process_wide_key(1);
+    signal_process_wide_key(2);
+    signal_process_wide_key(3);
 
     return RESULT_SUCCESS;
 }
@@ -686,13 +705,13 @@ static u64 GetSystemTick() {
 
 /// Close a handle
 static ResultCode CloseHandle(Handle handle) {
-    LOG_TRACE(Kernel_SVC, "Closing handle 0x%08X", handle);
+    NGLOG_TRACE(Kernel_SVC, "Closing handle 0x{:08X}", handle);
     return g_handle_table.Close(handle);
 }
 
 /// Reset an event
 static ResultCode ResetSignal(Handle handle) {
-    LOG_WARNING(Kernel_SVC, "(STUBBED) called handle 0x%08X", handle);
+    NGLOG_WARNING(Kernel_SVC, "(STUBBED) called handle 0x{:08X}", handle);
     auto event = g_handle_table.Get<Event>(handle);
     ASSERT(event != nullptr);
     event->Clear();
@@ -701,9 +720,60 @@ static ResultCode ResetSignal(Handle handle) {
 
 /// Creates a TransferMemory object
 static ResultCode CreateTransferMemory(Handle* handle, VAddr addr, u64 size, u32 permissions) {
-    LOG_WARNING(Kernel_SVC, "(STUBBED) called addr=0x%llx, size=0x%llx, perms=%08X", addr, size,
-                permissions);
+    NGLOG_WARNING(Kernel_SVC, "(STUBBED) called addr=0x{:X}, size=0x{:X}, perms=0x{:08X}", addr,
+                  size, permissions);
     *handle = 0;
+    return RESULT_SUCCESS;
+}
+
+static ResultCode GetThreadCoreMask(Handle thread_handle, u32* core, u64* mask) {
+    NGLOG_TRACE(Kernel_SVC, "called, handle=0x{:08X}", thread_handle);
+
+    const SharedPtr<Thread> thread = g_handle_table.Get<Thread>(thread_handle);
+    if (!thread) {
+        return ERR_INVALID_HANDLE;
+    }
+
+    *core = thread->ideal_core;
+    *mask = thread->affinity_mask;
+
+    return RESULT_SUCCESS;
+}
+
+static ResultCode SetThreadCoreMask(Handle thread_handle, u32 core, u64 mask) {
+    NGLOG_TRACE(Kernel_SVC, "called, handle=0x{:08X}, mask=0x{:08X}, core=0x{:X}", thread_handle,
+                mask, core);
+
+    const SharedPtr<Thread> thread = g_handle_table.Get<Thread>(thread_handle);
+    if (!thread) {
+        return ERR_INVALID_HANDLE;
+    }
+
+    thread->ChangeCore(core, mask);
+
+    return RESULT_SUCCESS;
+}
+
+static ResultCode CreateSharedMemory(Handle* handle, u64 size, u32 local_permissions,
+                                     u32 remote_permissions) {
+    NGLOG_TRACE(Kernel_SVC, "called, size=0x{:X}, localPerms=0x{:08X}, remotePerms=0x{:08X}", size,
+                local_permissions, remote_permissions);
+    auto sharedMemHandle =
+        SharedMemory::Create(g_handle_table.Get<Process>(KernelHandle::CurrentProcess), size,
+                             static_cast<MemoryPermission>(local_permissions),
+                             static_cast<MemoryPermission>(remote_permissions));
+
+    CASCADE_RESULT(*handle, g_handle_table.Create(sharedMemHandle));
+    return RESULT_SUCCESS;
+}
+
+static ResultCode ClearEvent(Handle handle) {
+    NGLOG_TRACE(Kernel_SVC, "called, event=0x{:08X}", handle);
+
+    SharedPtr<Event> evt = g_handle_table.Get<Event>(handle);
+    if (evt == nullptr)
+        return ERR_INVALID_HANDLE;
+    evt->Clear();
     return RESULT_SUCCESS;
 }
 
@@ -732,24 +802,24 @@ static const FunctionDef SVC_Table[] = {
     {0x0B, SvcWrap<SleepThread>, "SleepThread"},
     {0x0C, SvcWrap<GetThreadPriority>, "GetThreadPriority"},
     {0x0D, SvcWrap<SetThreadPriority>, "SetThreadPriority"},
-    {0x0E, nullptr, "GetThreadCoreMask"},
-    {0x0F, nullptr, "SetThreadCoreMask"},
+    {0x0E, SvcWrap<GetThreadCoreMask>, "GetThreadCoreMask"},
+    {0x0F, SvcWrap<SetThreadCoreMask>, "SetThreadCoreMask"},
     {0x10, SvcWrap<GetCurrentProcessorNumber>, "GetCurrentProcessorNumber"},
     {0x11, nullptr, "SignalEvent"},
-    {0x12, nullptr, "ClearEvent"},
+    {0x12, SvcWrap<ClearEvent>, "ClearEvent"},
     {0x13, SvcWrap<MapSharedMemory>, "MapSharedMemory"},
-    {0x14, nullptr, "UnmapSharedMemory"},
+    {0x14, SvcWrap<UnmapSharedMemory>, "UnmapSharedMemory"},
     {0x15, SvcWrap<CreateTransferMemory>, "CreateTransferMemory"},
     {0x16, SvcWrap<CloseHandle>, "CloseHandle"},
     {0x17, SvcWrap<ResetSignal>, "ResetSignal"},
     {0x18, SvcWrap<WaitSynchronization>, "WaitSynchronization"},
     {0x19, SvcWrap<CancelSynchronization>, "CancelSynchronization"},
-    {0x1A, SvcWrap<LockMutex>, "LockMutex"},
-    {0x1B, SvcWrap<UnlockMutex>, "UnlockMutex"},
+    {0x1A, SvcWrap<ArbitrateLock>, "ArbitrateLock"},
+    {0x1B, SvcWrap<ArbitrateUnlock>, "ArbitrateUnlock"},
     {0x1C, SvcWrap<WaitProcessWideKeyAtomic>, "WaitProcessWideKeyAtomic"},
     {0x1D, SvcWrap<SignalProcessWideKey>, "SignalProcessWideKey"},
     {0x1E, SvcWrap<GetSystemTick>, "GetSystemTick"},
-    {0x1F, SvcWrap<ConnectToPort>, "ConnectToPort"},
+    {0x1F, SvcWrap<ConnectToNamedPort>, "ConnectToNamedPort"},
     {0x20, nullptr, "SendSyncRequestLight"},
     {0x21, SvcWrap<SendSyncRequest>, "SendSyncRequest"},
     {0x22, nullptr, "SendSyncRequestWithUserBuffer"},
@@ -764,14 +834,14 @@ static const FunctionDef SVC_Table[] = {
     {0x2B, nullptr, "FlushDataCache"},
     {0x2C, nullptr, "MapPhysicalMemory"},
     {0x2D, nullptr, "UnmapPhysicalMemory"},
-    {0x2E, nullptr, "Unknown"},
+    {0x2E, nullptr, "GetNextThreadInfo"},
     {0x2F, nullptr, "GetLastThreadInfo"},
     {0x30, nullptr, "GetResourceLimitLimitValue"},
     {0x31, nullptr, "GetResourceLimitCurrentValue"},
-    {0x32, nullptr, "SetThreadActivity"},
-    {0x33, nullptr, "GetThreadContext"},
-    {0x34, nullptr, "Unknown"},
-    {0x35, nullptr, "Unknown"},
+    {0x32, SvcWrap<SetThreadActivity>, "SetThreadActivity"},
+    {0x33, SvcWrap<GetThreadContext>, "GetThreadContext"},
+    {0x34, nullptr, "WaitForAddress"},
+    {0x35, nullptr, "SignalToAddress"},
     {0x36, nullptr, "Unknown"},
     {0x37, nullptr, "Unknown"},
     {0x38, nullptr, "Unknown"},
@@ -779,7 +849,7 @@ static const FunctionDef SVC_Table[] = {
     {0x3A, nullptr, "Unknown"},
     {0x3B, nullptr, "Unknown"},
     {0x3C, nullptr, "DumpInfo"},
-    {0x3D, nullptr, "Unknown"},
+    {0x3D, nullptr, "DumpInfoNew"},
     {0x3E, nullptr, "Unknown"},
     {0x3F, nullptr, "Unknown"},
     {0x40, nullptr, "CreateSession"},
@@ -790,15 +860,15 @@ static const FunctionDef SVC_Table[] = {
     {0x45, nullptr, "CreateEvent"},
     {0x46, nullptr, "Unknown"},
     {0x47, nullptr, "Unknown"},
-    {0x48, nullptr, "Unknown"},
-    {0x49, nullptr, "Unknown"},
-    {0x4A, nullptr, "Unknown"},
-    {0x4B, nullptr, "Unknown"},
-    {0x4C, nullptr, "Unknown"},
+    {0x48, nullptr, "AllocateUnsafeMemory"},
+    {0x49, nullptr, "FreeUnsafeMemory"},
+    {0x4A, nullptr, "SetUnsafeAllocationLimit"},
+    {0x4B, nullptr, "CreateJitMemory"},
+    {0x4C, nullptr, "MapJitMemory"},
     {0x4D, nullptr, "SleepSystem"},
     {0x4E, nullptr, "ReadWriteRegister"},
     {0x4F, nullptr, "SetProcessActivity"},
-    {0x50, nullptr, "CreateSharedMemory"},
+    {0x50, SvcWrap<CreateSharedMemory>, "CreateSharedMemory"},
     {0x51, nullptr, "MapTransferMemory"},
     {0x52, nullptr, "UnmapTransferMemory"},
     {0x53, nullptr, "CreateInterruptEvent"},
@@ -829,7 +899,7 @@ static const FunctionDef SVC_Table[] = {
     {0x6C, nullptr, "SetHardwareBreakPoint"},
     {0x6D, nullptr, "GetDebugThreadParam"},
     {0x6E, nullptr, "Unknown"},
-    {0x6F, nullptr, "Unknown"},
+    {0x6F, nullptr, "GetMemoryInfo"},
     {0x70, nullptr, "CreatePort"},
     {0x71, nullptr, "ManageNamedPort"},
     {0x72, nullptr, "ConnectToPort"},
@@ -849,8 +919,8 @@ static const FunctionDef SVC_Table[] = {
 };
 
 static const FunctionDef* GetSVCInfo(u32 func_num) {
-    if (func_num >= ARRAY_SIZE(SVC_Table)) {
-        LOG_ERROR(Kernel_SVC, "unknown svc=0x%02X", func_num);
+    if (func_num >= std::size(SVC_Table)) {
+        NGLOG_ERROR(Kernel_SVC, "Unknown svc=0x{:02X}", func_num);
         return nullptr;
     }
     return &SVC_Table[func_num];
@@ -869,10 +939,10 @@ void CallSVC(u32 immediate) {
         if (info->func) {
             info->func();
         } else {
-            LOG_CRITICAL(Kernel_SVC, "unimplemented SVC function %s(..)", info->name);
+            NGLOG_CRITICAL(Kernel_SVC, "Unimplemented SVC function {}(..)", info->name);
         }
     } else {
-        LOG_CRITICAL(Kernel_SVC, "unknown SVC function 0x%x", immediate);
+        NGLOG_CRITICAL(Kernel_SVC, "Unknown SVC function 0x{:X}", immediate);
     }
 }
 

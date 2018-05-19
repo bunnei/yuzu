@@ -18,12 +18,10 @@ using Handle = u32;
 enum class HandleType : u32 {
     Unknown,
     Event,
-    Mutex,
     SharedMemory,
     Thread,
     Process,
     AddressArbiter,
-    ConditionVariable,
     Timer,
     ResourceLimit,
     CodeSet,
@@ -31,11 +29,6 @@ enum class HandleType : u32 {
     ServerPort,
     ClientSession,
     ServerSession,
-    Domain,
-};
-
-enum {
-    DEFAULT_STACK_SIZE = 0x10000,
 };
 
 enum class ResetType {
@@ -68,9 +61,7 @@ public:
     bool IsWaitable() const {
         switch (GetHandleType()) {
         case HandleType::Event:
-        case HandleType::Mutex:
         case HandleType::Thread:
-        case HandleType::ConditionVariable:
         case HandleType::Timer:
         case HandleType::ServerPort:
         case HandleType::ServerSession:
@@ -84,22 +75,7 @@ public:
         case HandleType::CodeSet:
         case HandleType::ClientPort:
         case HandleType::ClientSession:
-        case HandleType::Domain:
             return false;
-        }
-
-        UNREACHABLE();
-    }
-
-    /**
-     * Check if svcSendSyncRequest can be called on the object
-     * @return True svcSendSyncRequest can be called on the object, otherwise false
-     */
-    bool IsSyncable() const {
-        switch (GetHandleType()) {
-        case HandleType::ClientSession:
-        case HandleType::Domain:
-            return true;
         }
 
         UNREACHABLE();

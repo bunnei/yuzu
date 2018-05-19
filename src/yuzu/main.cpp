@@ -18,7 +18,6 @@
 #include "common/logging/log.h"
 #include "common/logging/text_formatter.h"
 #include "common/microprofile.h"
-#include "common/platform.h"
 #include "common/scm_rev.h"
 #include "common/scope_exit.h"
 #include "common/string_util.h"
@@ -26,10 +25,13 @@
 #include "core/gdbstub/gdbstub.h"
 #include "core/loader/loader.h"
 #include "core/settings.h"
+#include "video_core/debug_utils/debug_utils.h"
 #include "yuzu/about_dialog.h"
 #include "yuzu/bootmanager.h"
 #include "yuzu/configuration/config.h"
 #include "yuzu/configuration/configure_dialog.h"
+#include "yuzu/debugger/graphics/graphics_breakpoints.h"
+#include "yuzu/debugger/graphics/graphics_surface.h"
 #include "yuzu/debugger/profiler.h"
 #include "yuzu/debugger/registers.h"
 #include "yuzu/debugger/wait_tree.h"
@@ -40,6 +42,15 @@
 
 #ifdef QT_STATICPLUGIN
 Q_IMPORT_PLUGIN(QWindowsIntegrationPlugin);
+#endif
+
+#ifdef _WIN32
+extern "C" {
+// tells Nvidia and AMD drivers to use the dedicated GPU by default on laptops with switchable
+// graphics
+__declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
 #endif
 
 /**
@@ -69,9 +80,15 @@ static void ShowCalloutMessage(const QString& message, CalloutFlag flag) {
 void GMainWindow::ShowCallouts() {}
 
 GMainWindow::GMainWindow() : config(new Config()), emu_thread(nullptr) {
+
+    debug_context = Tegra::DebugContext::Construct();
+
     setAcceptDrops(true);
     ui.setupUi(this);
     statusBar()->hide();
+
+    default_theme_paths = QIcon::themeSearchPaths();
+    UpdateUITheme();
 
     InitializeWidgets();
     InitializeDebugWidgets();
@@ -161,6 +178,16 @@ void GMainWindow::InitializeDebugWidgets() {
     connect(this, &GMainWindow::EmulationStopping, registersWidget,
             &RegistersWidget::OnEmulationStopping);
 
+    graphicsBreakpointsWidget = new GraphicsBreakPointsWidget(debug_context, this);
+    addDockWidget(Qt::RightDockWidgetArea, graphicsBreakpointsWidget);
+    graphicsBreakpointsWidget->hide();
+    debug_menu->addAction(graphicsBreakpointsWidget->toggleViewAction());
+
+    graphicsSurfaceWidget = new GraphicsSurfaceWidget(debug_context, this);
+    addDockWidget(Qt::RightDockWidgetArea, graphicsSurfaceWidget);
+    graphicsSurfaceWidget->hide();
+    debug_menu->addAction(graphicsSurfaceWidget->toggleViewAction());
+
     waitTreeWidget = new WaitTreeWidget(this);
     addDockWidget(Qt::LeftDockWidgetArea, waitTreeWidget);
     waitTreeWidget->hide();
@@ -175,7 +202,7 @@ void GMainWindow::InitializeRecentFileMenuActions() {
     for (int i = 0; i < max_recent_files_item; ++i) {
         actions_recent_files[i] = new QAction(this);
         actions_recent_files[i]->setVisible(false);
-        connect(actions_recent_files[i], SIGNAL(triggered()), this, SLOT(OnMenuRecentFile()));
+        connect(actions_recent_files[i], &QAction::triggered, this, &GMainWindow::OnMenuRecentFile);
 
         ui.menu_recent_files->addAction(actions_recent_files[i]);
     }
@@ -187,13 +214,14 @@ void GMainWindow::InitializeHotkeys() {
     RegisterHotkey("Main Window", "Load File", QKeySequence::Open);
     RegisterHotkey("Main Window", "Start Emulation");
     RegisterHotkey("Main Window", "Fullscreen", QKeySequence::FullScreen);
-    RegisterHotkey("Main Window", "Exit Fullscreen", QKeySequence::Cancel, Qt::ApplicationShortcut);
+    RegisterHotkey("Main Window", "Exit Fullscreen", QKeySequence(Qt::Key_Escape),
+                   Qt::ApplicationShortcut);
     LoadHotkeys();
 
-    connect(GetHotkey("Main Window", "Load File", this), SIGNAL(activated()), this,
-            SLOT(OnMenuLoadFile()));
-    connect(GetHotkey("Main Window", "Start Emulation", this), SIGNAL(activated()), this,
-            SLOT(OnStartGame()));
+    connect(GetHotkey("Main Window", "Load File", this), &QShortcut::activated, this,
+            &GMainWindow::OnMenuLoadFile);
+    connect(GetHotkey("Main Window", "Start Emulation", this), &QShortcut::activated, this,
+            &GMainWindow::OnStartGame);
     connect(GetHotkey("Main Window", "Fullscreen", render_window), &QShortcut::activated,
             ui.action_Fullscreen, &QAction::trigger);
     connect(GetHotkey("Main Window", "Fullscreen", render_window), &QShortcut::activatedAmbiguously,
@@ -245,13 +273,14 @@ void GMainWindow::RestoreUIState() {
 }
 
 void GMainWindow::ConnectWidgetEvents() {
-    connect(game_list, SIGNAL(GameChosen(QString)), this, SLOT(OnGameListLoadFile(QString)));
-    connect(game_list, SIGNAL(OpenSaveFolderRequested(u64)), this,
-            SLOT(OnGameListOpenSaveFolder(u64)));
+    connect(game_list, &GameList::GameChosen, this, &GMainWindow::OnGameListLoadFile);
+    connect(game_list, &GameList::OpenSaveFolderRequested, this,
+            &GMainWindow::OnGameListOpenSaveFolder);
 
-    connect(this, SIGNAL(EmulationStarting(EmuThread*)), render_window,
-            SLOT(OnEmulationStarting(EmuThread*)));
-    connect(this, SIGNAL(EmulationStopping()), render_window, SLOT(OnEmulationStopping()));
+    connect(this, &GMainWindow::EmulationStarting, render_window,
+            &GRenderWindow::OnEmulationStarting);
+    connect(this, &GMainWindow::EmulationStopping, render_window,
+            &GRenderWindow::OnEmulationStopping);
 
     connect(&status_bar_update_timer, &QTimer::timeout, this, &GMainWindow::UpdateStatusBar);
 }
@@ -323,21 +352,24 @@ bool GMainWindow::LoadROM(const QString& filename) {
 
     Core::System& system{Core::System::GetInstance()};
 
-    const Core::System::ResultStatus result{system.Load(render_window, filename.toStdString())};
+    system.SetGPUDebugContext(debug_context);
 
-    Core::Telemetry().AddField(Telemetry::FieldType::App, "Frontend", "Qt");
+    const Core::System::ResultStatus result{system.Load(render_window, filename.toStdString())};
 
     if (result != Core::System::ResultStatus::Success) {
         switch (result) {
         case Core::System::ResultStatus::ErrorGetLoader:
-            LOG_CRITICAL(Frontend, "Failed to obtain loader for %s!",
-                         filename.toStdString().c_str());
+            NGLOG_CRITICAL(Frontend, "Failed to obtain loader for {}!", filename.toStdString());
             QMessageBox::critical(this, tr("Error while loading ROM!"),
                                   tr("The ROM format is not supported."));
             break;
-
+        case Core::System::ResultStatus::ErrorUnsupportedArch:
+            NGLOG_CRITICAL(Frontend, "Unsupported architecture detected!", filename.toStdString());
+            QMessageBox::critical(this, tr("Error while loading ROM!"),
+                                  tr("The ROM uses currently unusable 32-bit architecture"));
+            break;
         case Core::System::ResultStatus::ErrorSystemMode:
-            LOG_CRITICAL(Frontend, "Failed to load ROM!");
+            NGLOG_CRITICAL(Frontend, "Failed to load ROM!");
             QMessageBox::critical(this, tr("Error while loading ROM!"),
                                   tr("Could not determine the system mode."));
             break;
@@ -349,9 +381,9 @@ bool GMainWindow::LoadROM(const QString& filename) {
                    "yuzu. A real Switch is required.<br/><br/>"
                    "For more information on dumping and decrypting games, please see the following "
                    "wiki pages: <ul>"
-                   "<li><a href='https://citra-emu.org/wiki/dumping-game-cartridges/'>Dumping Game "
+                   "<li><a href='https://yuzu-emu.org/wiki/dumping-game-cartridges/'>Dumping Game "
                    "Cartridges</a></li>"
-                   "<li><a href='https://citra-emu.org/wiki/dumping-installed-titles/'>Dumping "
+                   "<li><a href='https://yuzu-emu.org/wiki/dumping-installed-titles/'>Dumping "
                    "Installed Titles</a></li>"
                    "</ul>"));
             break;
@@ -382,11 +414,12 @@ bool GMainWindow::LoadROM(const QString& filename) {
         }
         return false;
     }
+    Core::Telemetry().AddField(Telemetry::FieldType::App, "Frontend", "Qt");
     return true;
 }
 
 void GMainWindow::BootGame(const QString& filename) {
-    LOG_INFO(Frontend, "yuzu starting...");
+    NGLOG_INFO(Frontend, "yuzu starting...");
     StoreRecentFile(filename); // Put the filename on top of the list
 
     if (!LoadROM(filename))
@@ -398,17 +431,17 @@ void GMainWindow::BootGame(const QString& filename) {
     render_window->moveContext();
     emu_thread->start();
 
-    connect(render_window, SIGNAL(Closed()), this, SLOT(OnStopGame()));
+    connect(render_window, &GRenderWindow::Closed, this, &GMainWindow::OnStopGame);
     // BlockingQueuedConnection is important here, it makes sure we've finished refreshing our views
     // before the CPU continues
-    connect(emu_thread.get(), SIGNAL(DebugModeEntered()), registersWidget,
-            SLOT(OnDebugModeEntered()), Qt::BlockingQueuedConnection);
-    connect(emu_thread.get(), SIGNAL(DebugModeEntered()), waitTreeWidget,
-            SLOT(OnDebugModeEntered()), Qt::BlockingQueuedConnection);
-    connect(emu_thread.get(), SIGNAL(DebugModeLeft()), registersWidget, SLOT(OnDebugModeLeft()),
-            Qt::BlockingQueuedConnection);
-    connect(emu_thread.get(), SIGNAL(DebugModeLeft()), waitTreeWidget, SLOT(OnDebugModeLeft()),
-            Qt::BlockingQueuedConnection);
+    connect(emu_thread.get(), &EmuThread::DebugModeEntered, registersWidget,
+            &RegistersWidget::OnDebugModeEntered, Qt::BlockingQueuedConnection);
+    connect(emu_thread.get(), &EmuThread::DebugModeEntered, waitTreeWidget,
+            &WaitTreeWidget::OnDebugModeEntered, Qt::BlockingQueuedConnection);
+    connect(emu_thread.get(), &EmuThread::DebugModeLeft, registersWidget,
+            &RegistersWidget::OnDebugModeLeft, Qt::BlockingQueuedConnection);
+    connect(emu_thread.get(), &EmuThread::DebugModeLeft, waitTreeWidget,
+            &WaitTreeWidget::OnDebugModeLeft, Qt::BlockingQueuedConnection);
 
     // Update the GUI
     registersWidget->OnDebugModeEntered();
@@ -437,7 +470,7 @@ void GMainWindow::ShutdownGame() {
     emu_thread = nullptr;
 
     // The emulation is stopped, so closing the window or not does not matter anymore
-    disconnect(render_window, SIGNAL(Closed()), this, SLOT(OnStopGame()));
+    disconnect(render_window, &GRenderWindow::Closed, this, &GMainWindow::OnStopGame);
 
     // Update the GUI
     ui.action_Start->setEnabled(false);
@@ -548,8 +581,7 @@ void GMainWindow::OnStartGame() {
     emu_thread->SetRunning(true);
     qRegisterMetaType<Core::System::ResultStatus>("Core::System::ResultStatus");
     qRegisterMetaType<std::string>("std::string");
-    connect(emu_thread.get(), SIGNAL(ErrorThrown(Core::System::ResultStatus, std::string)), this,
-            SLOT(OnCoreError(Core::System::ResultStatus, std::string)));
+    connect(emu_thread.get(), &EmuThread::ErrorThrown, this, &GMainWindow::OnCoreError);
 
     ui.action_Start->setEnabled(false);
     ui.action_Start->setText(tr("Continue"));
@@ -635,6 +667,7 @@ void GMainWindow::OnConfigure() {
     auto result = configureDialog.exec();
     if (result == QDialog::Accepted) {
         configureDialog.applyConfiguration();
+        UpdateUITheme();
         config->Save();
     }
 }
@@ -673,18 +706,18 @@ void GMainWindow::UpdateStatusBar() {
 void GMainWindow::OnCoreError(Core::System::ResultStatus result, std::string details) {
     QMessageBox::StandardButton answer;
     QString status_message;
-    const QString common_message =
-        tr("The game you are trying to load requires additional files from your 3DS to be dumped "
-           "before playing.<br/><br/>For more information on dumping these files, please see the "
-           "following wiki page: <a "
-           "href='https://citra-emu.org/wiki/"
-           "dumping-system-archives-and-the-shared-fonts-from-a-3ds-console/'>Dumping System "
-           "Archives and the Shared Fonts from a 3DS Console</a>.<br/><br/>Would you like to quit "
-           "back to the game list? Continuing emulation may result in crashes, corrupted save "
-           "data, or other bugs.");
+    const QString common_message = tr(
+        "The game you are trying to load requires additional files from your Switch to be dumped "
+        "before playing.<br/><br/>For more information on dumping these files, please see the "
+        "following wiki page: <a "
+        "href='https://yuzu-emu.org/wiki/"
+        "dumping-system-archives-and-the-shared-fonts-from-a-switch-console/'>Dumping System "
+        "Archives and the Shared Fonts from a Switch Console</a>.<br/><br/>Would you like to quit "
+        "back to the game list? Continuing emulation may result in crashes, corrupted save "
+        "data, or other bugs.");
     switch (result) {
     case Core::System::ResultStatus::ErrorSystemFiles: {
-        QString message = "Citra was unable to locate a 3DS system archive";
+        QString message = "yuzu was unable to locate a Switch system archive";
         if (!details.empty()) {
             message.append(tr(": %1. ").arg(details.c_str()));
         } else {
@@ -699,7 +732,7 @@ void GMainWindow::OnCoreError(Core::System::ResultStatus result, std::string det
     }
 
     case Core::System::ResultStatus::ErrorSharedFont: {
-        QString message = tr("Citra was unable to locate the 3DS shared fonts. ");
+        QString message = tr("yuzu was unable to locate the Switch shared fonts. ");
         message.append(common_message);
         answer = QMessageBox::question(this, tr("Shared Fonts Not Found"), message,
                                        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
@@ -750,9 +783,11 @@ void GMainWindow::closeEvent(QCloseEvent* event) {
         return;
     }
 
-    UISettings::values.geometry = saveGeometry();
+    if (ui.action_Fullscreen->isChecked()) {
+        UISettings::values.geometry = saveGeometry();
+        UISettings::values.renderwindow_geometry = render_window->saveGeometry();
+    }
     UISettings::values.state = saveState();
-    UISettings::values.renderwindow_geometry = render_window->saveGeometry();
 #if MICROPROFILE_ENABLED
     UISettings::values.microprofile_geometry = microProfileDialog->saveGeometry();
     UISettings::values.microprofile_visible = microProfileDialog->isVisible();
@@ -813,6 +848,32 @@ bool GMainWindow::ConfirmChangeGame() {
 void GMainWindow::filterBarSetChecked(bool state) {
     ui.action_Show_Filter_Bar->setChecked(state);
     emit(OnToggleFilterBar());
+}
+
+void GMainWindow::UpdateUITheme() {
+    QStringList theme_paths(default_theme_paths);
+    if (UISettings::values.theme != UISettings::themes[0].second &&
+        !UISettings::values.theme.isEmpty()) {
+        QString theme_uri(":" + UISettings::values.theme + "/style.qss");
+        QFile f(theme_uri);
+        if (!f.exists()) {
+            NGLOG_ERROR(Frontend, "Unable to set style, stylesheet file not found");
+        } else {
+            f.open(QFile::ReadOnly | QFile::Text);
+            QTextStream ts(&f);
+            qApp->setStyleSheet(ts.readAll());
+            GMainWindow::setStyleSheet(ts.readAll());
+        }
+        theme_paths.append(QStringList{":/icons/default", ":/icons/" + UISettings::values.theme});
+        QIcon::setThemeName(":/icons/" + UISettings::values.theme);
+    } else {
+        qApp->setStyleSheet("");
+        GMainWindow::setStyleSheet("");
+        theme_paths.append(QStringList{":/icons/default"});
+        QIcon::setThemeName(":/icons/default");
+    }
+    QIcon::setThemeSearchPaths(theme_paths);
+    emit UpdateThemedIcons();
 }
 
 #ifdef main

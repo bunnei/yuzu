@@ -4,6 +4,8 @@
 
 #include <tuple>
 
+#include "core/core.h"
+#include "core/hle/ipc_helpers.h"
 #include "core/hle/kernel/client_port.h"
 #include "core/hle/kernel/client_session.h"
 #include "core/hle/kernel/handle_table.h"
@@ -56,34 +58,94 @@ void ServerSession::Acquire(Thread* thread) {
     pending_requesting_threads.pop_back();
 }
 
+ResultCode ServerSession::HandleDomainSyncRequest(Kernel::HLERequestContext& context) {
+    auto& domain_message_header = context.GetDomainMessageHeader();
+    if (domain_message_header) {
+        // Set domain handlers in HLE context, used for domain objects (IPC interfaces) as inputs
+        context.SetDomainRequestHandlers(domain_request_handlers);
+
+        // If there is a DomainMessageHeader, then this is CommandType "Request"
+        const u32 object_id{context.GetDomainMessageHeader()->object_id};
+        switch (domain_message_header->command) {
+        case IPC::DomainMessageHeader::CommandType::SendMessage:
+            return domain_request_handlers[object_id - 1]->HandleSyncRequest(context);
+
+        case IPC::DomainMessageHeader::CommandType::CloseVirtualHandle: {
+            NGLOG_DEBUG(IPC, "CloseVirtualHandle, object_id=0x{:08X}", object_id);
+
+            domain_request_handlers[object_id - 1] = nullptr;
+
+            IPC::ResponseBuilder rb{context, 2};
+            rb.Push(RESULT_SUCCESS);
+            return RESULT_SUCCESS;
+        }
+        }
+
+        NGLOG_CRITICAL(IPC, "Unknown domain command={}",
+                       static_cast<int>(domain_message_header->command.Value()));
+        ASSERT(false);
+    }
+
+    return RESULT_SUCCESS;
+}
+
 ResultCode ServerSession::HandleSyncRequest(SharedPtr<Thread> thread) {
     // The ServerSession received a sync request, this means that there's new data available
     // from its ClientSession, so wake up any threads that may be waiting on a svcReplyAndReceive or
     // similar.
 
-    // If this ServerSession has an associated HLE handler, forward the request to it.
-    ResultCode result{RESULT_SUCCESS};
-    if (hle_handler != nullptr) {
-        // Attempt to translate the incoming request's command buffer.
-        ResultCode translate_result = TranslateHLERequest(this);
-        if (translate_result.IsError())
-            return translate_result;
+    Kernel::HLERequestContext context(this);
+    u32* cmd_buf = (u32*)Memory::GetPointer(thread->GetTLSAddress());
+    context.PopulateFromIncomingCommandBuffer(cmd_buf, *Core::CurrentProcess(),
+                                              Kernel::g_handle_table);
 
-        Kernel::HLERequestContext context(this);
-        u32* cmd_buf = (u32*)Memory::GetPointer(Kernel::GetCurrentThread()->GetTLSAddress());
-        context.PopulateFromIncomingCommandBuffer(cmd_buf, *Kernel::g_current_process,
-                                                  Kernel::g_handle_table);
-
+    ResultCode result = RESULT_SUCCESS;
+    // If the session has been converted to a domain, handle the domain request
+    if (IsDomain() && context.GetDomainMessageHeader()) {
+        result = HandleDomainSyncRequest(context);
+        // If there is no domain header, the regular session handler is used
+    } else if (hle_handler != nullptr) {
+        // If this ServerSession has an associated HLE handler, forward the request to it.
         result = hle_handler->HandleSyncRequest(context);
-    } else {
-        // Add the thread to the list of threads that have issued a sync request with this
-        // server.
-        pending_requesting_threads.push_back(std::move(thread));
+    }
+
+    if (thread->status == THREADSTATUS_RUNNING) {
+        // Put the thread to sleep until the server replies, it will be awoken in
+        // svcReplyAndReceive for LLE servers.
+        thread->status = THREADSTATUS_WAIT_IPC;
+
+        if (hle_handler != nullptr) {
+            // For HLE services, we put the request threads to sleep for a short duration to
+            // simulate IPC overhead, but only if the HLE handler didn't put the thread to sleep for
+            // other reasons like an async callback. The IPC overhead is needed to prevent
+            // starvation when a thread only does sync requests to HLE services while a
+            // lower-priority thread is waiting to run.
+
+            // This delay was approximated in a homebrew application by measuring the average time
+            // it takes for svcSendSyncRequest to return when performing the SetLcdForceBlack IPC
+            // request to the GSP:GPU service in a n3DS with firmware 11.6. The measured values have
+            // a high variance and vary between models.
+            static constexpr u64 IPCDelayNanoseconds = 39000;
+            thread->WakeAfterDelay(IPCDelayNanoseconds);
+        } else {
+            // Add the thread to the list of threads that have issued a sync request with this
+            // server.
+            pending_requesting_threads.push_back(std::move(thread));
+        }
     }
 
     // If this ServerSession does not have an HLE implementation, just wake up the threads waiting
     // on it.
     WakeupAllWaitingThreads();
+
+    // Handle scenario when ConvertToDomain command was issued, as we must do the conversion at the
+    // end of the command such that only commands following this one are handled as domains
+    if (convert_to_domain) {
+        ASSERT_MSG(domain_request_handlers.empty(), "already a domain");
+        domain_request_handlers = {hle_handler};
+        convert_to_domain = false;
+    }
+
     return result;
 }
 
@@ -102,10 +164,5 @@ ServerSession::SessionPair ServerSession::CreateSessionPair(const std::string& n
     server_session->parent = parent;
 
     return std::make_tuple(std::move(server_session), std::move(client_session));
-}
-
-ResultCode TranslateHLERequest(ServerSession* server_session) {
-    // TODO(Subv): Implement this function once multiple concurrent processes are supported.
-    return RESULT_SUCCESS;
 }
 } // namespace Kernel

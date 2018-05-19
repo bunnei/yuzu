@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <algorithm>
 #include <chrono>
 #include <mutex>
 #include <thread>
@@ -69,7 +70,7 @@ PerfStats::Results PerfStats::GetAndResetStats(u64 current_system_time_us) {
 double PerfStats::GetLastFrameTimeScale() {
     std::lock_guard<std::mutex> lock(object_mutex);
 
-    constexpr double FRAME_LENGTH = 1.0 / 60; // GPU::SCREEN_REFRESH_RATE;
+    constexpr double FRAME_LENGTH = 1.0 / 60;
     return duration_cast<DoubleSecs>(previous_frame_length).count() / FRAME_LENGTH;
 }
 
@@ -87,7 +88,7 @@ void FrameLimiter::DoFrameLimiting(u64 current_system_time_us) {
     frame_limiting_delta_err += microseconds(current_system_time_us - previous_system_time_us);
     frame_limiting_delta_err -= duration_cast<microseconds>(now - previous_walltime);
     frame_limiting_delta_err =
-        MathUtil::Clamp(frame_limiting_delta_err, -MAX_LAG_TIME_US, MAX_LAG_TIME_US);
+        std::clamp(frame_limiting_delta_err, -MAX_LAG_TIME_US, MAX_LAG_TIME_US);
 
     if (frame_limiting_delta_err > microseconds::zero()) {
         std::this_thread::sleep_for(frame_limiting_delta_err);

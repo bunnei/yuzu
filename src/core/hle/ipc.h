@@ -91,6 +91,10 @@ struct BufferDescriptorX {
         address |= static_cast<VAddr>(address_bits_36_38) << 36;
         return address;
     }
+
+    u64 Size() const {
+        return static_cast<u64>(size);
+    }
 };
 static_assert(sizeof(BufferDescriptorX) == 8, "BufferDescriptorX size is incorrect");
 
@@ -133,6 +137,10 @@ struct BufferDescriptorC {
         address |= static_cast<VAddr>(address_bits_32_47) << 32;
         return address;
     }
+
+    u64 Size() const {
+        return static_cast<u64>(size);
+    }
 };
 static_assert(sizeof(BufferDescriptorC) == 8, "BufferDescriptorC size is incorrect");
 
@@ -143,6 +151,11 @@ struct DataPayloadHeader {
 static_assert(sizeof(DataPayloadHeader) == 8, "DataPayloadRequest size is incorrect");
 
 struct DomainMessageHeader {
+    enum class CommandType : u32_le {
+        SendMessage = 1,
+        CloseVirtualHandle = 2,
+    };
+
     union {
         // Used when responding to an IPC request, Server -> Client.
         struct {
@@ -153,7 +166,8 @@ struct DomainMessageHeader {
         // Used when performing an IPC request, Client -> Server.
         struct {
             union {
-                BitField<0, 8, u32_le> command;
+                BitField<0, 8, CommandType> command;
+                BitField<8, 8, u32_le> input_object_count;
                 BitField<16, 16, u32_le> size;
             };
             u32_le object_id;

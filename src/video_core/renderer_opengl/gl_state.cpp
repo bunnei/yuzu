@@ -2,8 +2,8 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <iterator>
 #include <glad/glad.h>
-#include "common/common_funcs.h"
 #include "common/logging/log.h"
 #include "video_core/renderer_opengl/gl_state.h"
 
@@ -33,7 +33,7 @@ OpenGLState::OpenGLState() {
     stencil.action_depth_pass = GL_KEEP;
     stencil.action_stencil_fail = GL_KEEP;
 
-    blend.enabled = false;
+    blend.enabled = true;
     blend.rgb_equation = GL_FUNC_ADD;
     blend.a_equation = GL_FUNC_ADD;
     blend.src_rgb_func = GL_ONE;
@@ -68,6 +68,18 @@ OpenGLState::OpenGLState() {
     draw.vertex_buffer = 0;
     draw.uniform_buffer = 0;
     draw.shader_program = 0;
+    draw.program_pipeline = 0;
+
+    scissor.enabled = false;
+    scissor.x = 0;
+    scissor.y = 0;
+    scissor.width = 0;
+    scissor.height = 0;
+
+    viewport.x = 0;
+    viewport.y = 0;
+    viewport.width = 0;
+    viewport.height = 0;
 
     clip_distance = {};
 }
@@ -148,9 +160,6 @@ void OpenGLState::Apply() const {
     if (blend.enabled != cur_state.blend.enabled) {
         if (blend.enabled) {
             glEnable(GL_BLEND);
-
-            cur_state.logic_op = GL_COPY;
-            glLogicOp(cur_state.logic_op);
             glDisable(GL_COLOR_LOGIC_OP);
         } else {
             glDisable(GL_BLEND);
@@ -183,9 +192,9 @@ void OpenGLState::Apply() const {
     }
 
     // Textures
-    for (unsigned i = 0; i < ARRAY_SIZE(texture_units); ++i) {
+    for (size_t i = 0; i < std::size(texture_units); ++i) {
         if (texture_units[i].texture_2d != cur_state.texture_units[i].texture_2d) {
-            glActiveTexture(TextureUnits::PicaTexture(i).Enum());
+            glActiveTexture(TextureUnits::MaxwellTexture(i).Enum());
             glBindTexture(GL_TEXTURE_2D, texture_units[i].texture_2d);
         }
         if (texture_units[i].sampler != cur_state.texture_units[i].sampler) {
@@ -193,10 +202,24 @@ void OpenGLState::Apply() const {
         }
     }
 
+    // Constbuffers
+    for (u32 stage = 0; stage < draw.const_buffers.size(); ++stage) {
+        for (u32 buffer_id = 0; buffer_id < draw.const_buffers[stage].size(); ++buffer_id) {
+            auto& current = cur_state.draw.const_buffers[stage][buffer_id];
+            auto& new_state = draw.const_buffers[stage][buffer_id];
+            if (current.enabled != new_state.enabled || current.bindpoint != new_state.bindpoint ||
+                current.ssbo != new_state.ssbo) {
+                if (new_state.enabled) {
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, new_state.bindpoint, new_state.ssbo);
+                }
+            }
+        }
+    }
+
     // Lighting LUTs
     if (lighting_lut.texture_buffer != cur_state.lighting_lut.texture_buffer) {
         glActiveTexture(TextureUnits::LightingLUT.Enum());
-        glBindTexture(GL_TEXTURE_BUFFER, cur_state.lighting_lut.texture_buffer);
+        glBindTexture(GL_TEXTURE_BUFFER, lighting_lut.texture_buffer);
     }
 
     // Fog LUT
@@ -263,6 +286,31 @@ void OpenGLState::Apply() const {
         glUseProgram(draw.shader_program);
     }
 
+    // Program pipeline
+    if (draw.program_pipeline != cur_state.draw.program_pipeline) {
+        glBindProgramPipeline(draw.program_pipeline);
+    }
+
+    // Scissor test
+    if (scissor.enabled != cur_state.scissor.enabled) {
+        if (scissor.enabled) {
+            glEnable(GL_SCISSOR_TEST);
+        } else {
+            glDisable(GL_SCISSOR_TEST);
+        }
+    }
+
+    if (scissor.x != cur_state.scissor.x || scissor.y != cur_state.scissor.y ||
+        scissor.width != cur_state.scissor.width || scissor.height != cur_state.scissor.height) {
+        glScissor(scissor.x, scissor.y, scissor.width, scissor.height);
+    }
+
+    if (viewport.x != cur_state.viewport.x || viewport.y != cur_state.viewport.y ||
+        viewport.width != cur_state.viewport.width ||
+        viewport.height != cur_state.viewport.height) {
+        glViewport(viewport.x, viewport.y, viewport.width, viewport.height);
+    }
+
     // Clip distance
     for (size_t i = 0; i < clip_distance.size(); ++i) {
         if (clip_distance[i] != cur_state.clip_distance[i]) {
@@ -277,62 +325,75 @@ void OpenGLState::Apply() const {
     cur_state = *this;
 }
 
-void OpenGLState::ResetTexture(GLuint handle) {
-    for (auto& unit : cur_state.texture_units) {
+OpenGLState& OpenGLState::ResetTexture(GLuint handle) {
+    for (auto& unit : texture_units) {
         if (unit.texture_2d == handle) {
             unit.texture_2d = 0;
         }
     }
-    if (cur_state.lighting_lut.texture_buffer == handle)
-        cur_state.lighting_lut.texture_buffer = 0;
-    if (cur_state.fog_lut.texture_buffer == handle)
-        cur_state.fog_lut.texture_buffer = 0;
-    if (cur_state.proctex_noise_lut.texture_buffer == handle)
-        cur_state.proctex_noise_lut.texture_buffer = 0;
-    if (cur_state.proctex_color_map.texture_buffer == handle)
-        cur_state.proctex_color_map.texture_buffer = 0;
-    if (cur_state.proctex_alpha_map.texture_buffer == handle)
-        cur_state.proctex_alpha_map.texture_buffer = 0;
-    if (cur_state.proctex_lut.texture_buffer == handle)
-        cur_state.proctex_lut.texture_buffer = 0;
-    if (cur_state.proctex_diff_lut.texture_buffer == handle)
-        cur_state.proctex_diff_lut.texture_buffer = 0;
+    if (lighting_lut.texture_buffer == handle)
+        lighting_lut.texture_buffer = 0;
+    if (fog_lut.texture_buffer == handle)
+        fog_lut.texture_buffer = 0;
+    if (proctex_noise_lut.texture_buffer == handle)
+        proctex_noise_lut.texture_buffer = 0;
+    if (proctex_color_map.texture_buffer == handle)
+        proctex_color_map.texture_buffer = 0;
+    if (proctex_alpha_map.texture_buffer == handle)
+        proctex_alpha_map.texture_buffer = 0;
+    if (proctex_lut.texture_buffer == handle)
+        proctex_lut.texture_buffer = 0;
+    if (proctex_diff_lut.texture_buffer == handle)
+        proctex_diff_lut.texture_buffer = 0;
+    return *this;
 }
 
-void OpenGLState::ResetSampler(GLuint handle) {
-    for (auto& unit : cur_state.texture_units) {
+OpenGLState& OpenGLState::ResetSampler(GLuint handle) {
+    for (auto& unit : texture_units) {
         if (unit.sampler == handle) {
             unit.sampler = 0;
         }
     }
+    return *this;
 }
 
-void OpenGLState::ResetProgram(GLuint handle) {
-    if (cur_state.draw.shader_program == handle) {
-        cur_state.draw.shader_program = 0;
+OpenGLState& OpenGLState::ResetProgram(GLuint handle) {
+    if (draw.shader_program == handle) {
+        draw.shader_program = 0;
     }
+    return *this;
 }
 
-void OpenGLState::ResetBuffer(GLuint handle) {
-    if (cur_state.draw.vertex_buffer == handle) {
-        cur_state.draw.vertex_buffer = 0;
+OpenGLState& OpenGLState::ResetPipeline(GLuint handle) {
+    if (draw.program_pipeline == handle) {
+        draw.program_pipeline = 0;
     }
-    if (cur_state.draw.uniform_buffer == handle) {
-        cur_state.draw.uniform_buffer = 0;
-    }
+    return *this;
 }
 
-void OpenGLState::ResetVertexArray(GLuint handle) {
-    if (cur_state.draw.vertex_array == handle) {
-        cur_state.draw.vertex_array = 0;
+OpenGLState& OpenGLState::ResetBuffer(GLuint handle) {
+    if (draw.vertex_buffer == handle) {
+        draw.vertex_buffer = 0;
     }
+    if (draw.uniform_buffer == handle) {
+        draw.uniform_buffer = 0;
+    }
+    return *this;
 }
 
-void OpenGLState::ResetFramebuffer(GLuint handle) {
-    if (cur_state.draw.read_framebuffer == handle) {
-        cur_state.draw.read_framebuffer = 0;
+OpenGLState& OpenGLState::ResetVertexArray(GLuint handle) {
+    if (draw.vertex_array == handle) {
+        draw.vertex_array = 0;
     }
-    if (cur_state.draw.draw_framebuffer == handle) {
-        cur_state.draw.draw_framebuffer = 0;
+    return *this;
+}
+
+OpenGLState& OpenGLState::ResetFramebuffer(GLuint handle) {
+    if (draw.read_framebuffer == handle) {
+        draw.read_framebuffer = 0;
     }
+    if (draw.draw_framebuffer == handle) {
+        draw.draw_framebuffer = 0;
+    }
+    return *this;
 }

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cinttypes>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <tuple>
@@ -57,7 +58,8 @@ static u64 event_fifo_id;
 // to the event_queue by the emu thread
 static Common::MPSCQueue<Event, false> ts_queue;
 
-static constexpr int MAX_SLICE_LENGTH = 20000;
+constexpr int MAX_SLICE_LENGTH = 20000;
+constexpr u64 MAX_VALUE_TO_MULTIPLY = std::numeric_limits<s64>::max() / BASE_CLOCK_RATE;
 
 static s64 idled_cycles;
 
@@ -70,11 +72,59 @@ static EventType* ev_lost = nullptr;
 
 static void EmptyTimedCallback(u64 userdata, s64 cyclesLate) {}
 
+s64 usToCycles(s64 us) {
+    if (us / 1000000 > MAX_VALUE_TO_MULTIPLY) {
+        NGLOG_ERROR(Core_Timing, "Integer overflow, use max value");
+        return std::numeric_limits<s64>::max();
+    }
+    if (us > MAX_VALUE_TO_MULTIPLY) {
+        NGLOG_DEBUG(Core_Timing, "Time very big, do rounding");
+        return BASE_CLOCK_RATE * (us / 1000000);
+    }
+    return (BASE_CLOCK_RATE * us) / 1000000;
+}
+
+s64 usToCycles(u64 us) {
+    if (us / 1000000 > MAX_VALUE_TO_MULTIPLY) {
+        NGLOG_ERROR(Core_Timing, "Integer overflow, use max value");
+        return std::numeric_limits<s64>::max();
+    }
+    if (us > MAX_VALUE_TO_MULTIPLY) {
+        NGLOG_DEBUG(Core_Timing, "Time very big, do rounding");
+        return BASE_CLOCK_RATE * static_cast<s64>(us / 1000000);
+    }
+    return (BASE_CLOCK_RATE * static_cast<s64>(us)) / 1000000;
+}
+
+s64 nsToCycles(s64 ns) {
+    if (ns / 1000000000 > MAX_VALUE_TO_MULTIPLY) {
+        NGLOG_ERROR(Core_Timing, "Integer overflow, use max value");
+        return std::numeric_limits<s64>::max();
+    }
+    if (ns > MAX_VALUE_TO_MULTIPLY) {
+        NGLOG_DEBUG(Core_Timing, "Time very big, do rounding");
+        return BASE_CLOCK_RATE * (ns / 1000000000);
+    }
+    return (BASE_CLOCK_RATE * ns) / 1000000000;
+}
+
+s64 nsToCycles(u64 ns) {
+    if (ns / 1000000000 > MAX_VALUE_TO_MULTIPLY) {
+        NGLOG_ERROR(Core_Timing, "Integer overflow, use max value");
+        return std::numeric_limits<s64>::max();
+    }
+    if (ns > MAX_VALUE_TO_MULTIPLY) {
+        NGLOG_DEBUG(Core_Timing, "Time very big, do rounding");
+        return BASE_CLOCK_RATE * (static_cast<s64>(ns) / 1000000000);
+    }
+    return (BASE_CLOCK_RATE * static_cast<s64>(ns)) / 1000000000;
+}
+
 EventType* RegisterEvent(const std::string& name, TimedCallback callback) {
     // check for existing type with same name.
     // we want event type names to remain unique so that we can use them for serialization.
     ASSERT_MSG(event_types.find(name) == event_types.end(),
-               "CoreTiming Event \"%s\" is already registered. Events should only be registered "
+               "CoreTiming Event \"{}\" is already registered. Events should only be registered "
                "during Init to avoid breaking save states.",
                name.c_str());
 
@@ -122,7 +172,7 @@ u64 GetTicks() {
 }
 
 void AddTicks(u64 ticks) {
-    downcount -= ticks;
+    downcount -= static_cast<int>(ticks);
 }
 
 u64 GetIdleTicks() {
@@ -208,7 +258,7 @@ void Advance() {
         Event evt = std::move(event_queue.front());
         std::pop_heap(event_queue.begin(), event_queue.end(), std::greater<Event>());
         event_queue.pop_back();
-        evt.type->callback(evt.userdata, global_timer - evt.time);
+        evt.type->callback(evt.userdata, static_cast<int>(global_timer - evt.time));
     }
 
     is_global_timer_sane = false;

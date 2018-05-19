@@ -15,7 +15,7 @@ namespace Telemetry {
 /// Field type, used for grouping fields together in the final submitted telemetry log
 enum class FieldType : u8 {
     None = 0,     ///< No specified field group
-    App,          ///< Citra application fields (e.g. version, branch, etc.)
+    App,          ///< yuzu application fields (e.g. version, branch, etc.)
     Session,      ///< Emulated session fields (e.g. title ID, log, etc.)
     Performance,  ///< Emulated performance (e.g. fps, emulated CPU speed, etc.)
     UserFeedback, ///< User submitted feedback (e.g. star rating, user notes, etc.)
@@ -53,10 +53,10 @@ template <typename T>
 class Field : public FieldInterface {
 public:
     Field(FieldType type, std::string name, const T& value)
-        : type(type), name(std::move(name)), value(value) {}
+        : name(std::move(name)), type(type), value(value) {}
 
     Field(FieldType type, std::string name, T&& value)
-        : type(type), name(std::move(name)), value(std::move(value)) {}
+        : name(std::move(name)), type(type), value(std::move(value)) {}
 
     Field(const Field& other) : Field(other.type, other.name, other.value) {}
 

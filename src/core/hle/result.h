@@ -19,6 +19,8 @@
 enum class ErrorDescription : u32 {
     Success = 0,
     RemoteProcessDead = 301,
+    InvalidOffset = 6061,
+    InvalidLength = 6062,
 };
 
 /**
@@ -106,11 +108,11 @@ union ResultCode {
     }
 
     constexpr bool IsSuccess() const {
-        return is_error.ExtractValue(raw) == 0;
+        return raw == 0;
     }
 
     constexpr bool IsError() const {
-        return is_error.ExtractValue(raw) == 1;
+        return raw != 0;
     }
 };
 
@@ -198,6 +200,9 @@ public:
     }
 
     ResultVal& operator=(const ResultVal& o) {
+        if (this == &o) {
+            return *this;
+        }
         if (!empty()) {
             if (!o.empty()) {
                 object = o.object;

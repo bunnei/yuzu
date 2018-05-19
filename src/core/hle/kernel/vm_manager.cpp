@@ -10,15 +10,33 @@
 #include "core/hle/kernel/errors.h"
 #include "core/hle/kernel/vm_manager.h"
 #include "core/memory.h"
+#include "core/memory_hook.h"
 #include "core/memory_setup.h"
-#include "core/mmio.h"
 
 namespace Kernel {
 
 static const char* GetMemoryStateName(MemoryState state) {
     static const char* names[] = {
-        "Free",   "Reserved",   "IO",      "Static", "Code",      "Private",
-        "Shared", "Continuous", "Aliased", "Alias",  "AliasCode", "Locked",
+        "Unmapped",
+        "Io",
+        "Normal",
+        "CodeStatic",
+        "CodeMutable",
+        "Heap",
+        "Shared",
+        "Unknown1"
+        "ModuleCodeStatic",
+        "ModuleCodeMutable",
+        "IpcBuffer0",
+        "Mapped",
+        "ThreadLocal",
+        "TransferMemoryIsolated",
+        "TransferMemory",
+        "ProcessMemory",
+        "Unknown2"
+        "IpcBuffer1",
+        "IpcBuffer3",
+        "KernelStack",
     };
 
     return names[(int)state];
@@ -60,8 +78,8 @@ void VMManager::Reset() {
     vma_map.emplace(initial_vma.base, initial_vma);
 
     page_table.pointers.fill(nullptr);
+    page_table.special_regions.clear();
     page_table.attributes.fill(Memory::PageType::Unmapped);
-    page_table.cached_res_count.fill(0);
 
     UpdatePageTableForVMA(initial_vma);
 }
@@ -86,8 +104,15 @@ ResultVal<VMManager::VMAHandle> VMManager::MapMemoryBlock(VAddr target,
     VirtualMemoryArea& final_vma = vma_handle->second;
     ASSERT(final_vma.size == size);
 
-    Core::CPU().MapBackingMemory(target, size, block->data() + offset,
-                                 VMAPermission::ReadWriteExecute);
+    auto& system = Core::System::GetInstance();
+    system.ArmInterface(0).MapBackingMemory(target, size, block->data() + offset,
+                                            VMAPermission::ReadWriteExecute);
+    system.ArmInterface(1).MapBackingMemory(target, size, block->data() + offset,
+                                            VMAPermission::ReadWriteExecute);
+    system.ArmInterface(2).MapBackingMemory(target, size, block->data() + offset,
+                                            VMAPermission::ReadWriteExecute);
+    system.ArmInterface(3).MapBackingMemory(target, size, block->data() + offset,
+                                            VMAPermission::ReadWriteExecute);
 
     final_vma.type = VMAType::AllocatedMemoryBlock;
     final_vma.permissions = VMAPermission::ReadWrite;
@@ -108,7 +133,11 @@ ResultVal<VMManager::VMAHandle> VMManager::MapBackingMemory(VAddr target, u8* me
     VirtualMemoryArea& final_vma = vma_handle->second;
     ASSERT(final_vma.size == size);
 
-    Core::CPU().MapBackingMemory(target, size, memory, VMAPermission::ReadWriteExecute);
+    auto& system = Core::System::GetInstance();
+    system.ArmInterface(0).MapBackingMemory(target, size, memory, VMAPermission::ReadWriteExecute);
+    system.ArmInterface(1).MapBackingMemory(target, size, memory, VMAPermission::ReadWriteExecute);
+    system.ArmInterface(2).MapBackingMemory(target, size, memory, VMAPermission::ReadWriteExecute);
+    system.ArmInterface(3).MapBackingMemory(target, size, memory, VMAPermission::ReadWriteExecute);
 
     final_vma.type = VMAType::BackingMemory;
     final_vma.permissions = VMAPermission::ReadWrite;
@@ -121,7 +150,7 @@ ResultVal<VMManager::VMAHandle> VMManager::MapBackingMemory(VAddr target, u8* me
 
 ResultVal<VMManager::VMAHandle> VMManager::MapMMIO(VAddr target, PAddr paddr, u64 size,
                                                    MemoryState state,
-                                                   Memory::MMIORegionPointer mmio_handler) {
+                                                   Memory::MemoryHookPointer mmio_handler) {
     // This is the appropriately sized VMA that will turn into our allocation.
     CASCADE_RESULT(VMAIter vma_handle, CarveVMA(target, size));
     VirtualMemoryArea& final_vma = vma_handle->second;
@@ -141,7 +170,7 @@ VMManager::VMAIter VMManager::Unmap(VMAIter vma_handle) {
     VirtualMemoryArea& vma = vma_handle->second;
     vma.type = VMAType::Free;
     vma.permissions = VMAPermission::None;
-    vma.meminfo_state = MemoryState::Free;
+    vma.meminfo_state = MemoryState::Unmapped;
 
     vma.backing_block = nullptr;
     vma.offset = 0;
@@ -165,6 +194,13 @@ ResultCode VMManager::UnmapRange(VAddr target, u64 size) {
     }
 
     ASSERT(FindVMA(target)->second.size >= size);
+
+    auto& system = Core::System::GetInstance();
+    system.ArmInterface(0).UnmapMemory(target, size);
+    system.ArmInterface(1).UnmapMemory(target, size);
+    system.ArmInterface(2).UnmapMemory(target, size);
+    system.ArmInterface(3).UnmapMemory(target, size);
+
     return RESULT_SUCCESS;
 }
 
@@ -203,10 +239,10 @@ void VMManager::RefreshMemoryBlockMappings(const std::vector<u8>* block) {
     }
 }
 
-void VMManager::LogLayout(Log::Level log_level) const {
+void VMManager::LogLayout() const {
     for (const auto& p : vma_map) {
         const VirtualMemoryArea& vma = p.second;
-        LOG_GENERIC(Log::Class::Kernel, log_level, "%08X - %08X  size: %8X %c%c%c %s", vma.base,
+        NGLOG_DEBUG(Kernel, "{:016X} - {:016X} size: {:016X} {}{}{} {}", vma.base,
                     vma.base + vma.size, vma.size,
                     (u8)vma.permissions & (u8)VMAPermission::Read ? 'R' : '-',
                     (u8)vma.permissions & (u8)VMAPermission::Write ? 'W' : '-',
@@ -222,8 +258,8 @@ VMManager::VMAIter VMManager::StripIterConstness(const VMAHandle& iter) {
 }
 
 ResultVal<VMManager::VMAIter> VMManager::CarveVMA(VAddr base, u64 size) {
-    ASSERT_MSG((size & Memory::PAGE_MASK) == 0, "non-page aligned size: 0x%8X", size);
-    ASSERT_MSG((base & Memory::PAGE_MASK) == 0, "non-page aligned base: 0x%08X", base);
+    ASSERT_MSG((size & Memory::PAGE_MASK) == 0, "non-page aligned size: 0x{:016X}", size);
+    ASSERT_MSG((base & Memory::PAGE_MASK) == 0, "non-page aligned base: 0x{:016X}", base);
 
     VMAIter vma_handle = StripIterConstness(FindVMA(base));
     if (vma_handle == vma_map.end()) {
@@ -258,8 +294,8 @@ ResultVal<VMManager::VMAIter> VMManager::CarveVMA(VAddr base, u64 size) {
 }
 
 ResultVal<VMManager::VMAIter> VMManager::CarveVMARange(VAddr target, u64 size) {
-    ASSERT_MSG((size & Memory::PAGE_MASK) == 0, "non-page aligned size: 0x%8X", size);
-    ASSERT_MSG((target & Memory::PAGE_MASK) == 0, "non-page aligned base: 0x%08X", target);
+    ASSERT_MSG((size & Memory::PAGE_MASK) == 0, "non-page aligned size: 0x{:016X}", size);
+    ASSERT_MSG((target & Memory::PAGE_MASK) == 0, "non-page aligned base: 0x{:016X}", target);
 
     VAddr target_end = target + size;
     ASSERT(target_end >= target);
@@ -356,33 +392,23 @@ void VMManager::UpdatePageTableForVMA(const VirtualMemoryArea& vma) {
 }
 
 u64 VMManager::GetTotalMemoryUsage() {
-    LOG_WARNING(Kernel, "(STUBBED) called");
-    return 0x400000;
+    NGLOG_WARNING(Kernel, "(STUBBED) called");
+    return 0xF8000000;
 }
 
 u64 VMManager::GetTotalHeapUsage() {
-    LOG_WARNING(Kernel, "(STUBBED) called");
-    return 0x10000;
+    NGLOG_WARNING(Kernel, "(STUBBED) called");
+    return 0x0;
 }
 
 VAddr VMManager::GetAddressSpaceBaseAddr() {
-    LOG_WARNING(Kernel, "(STUBBED) called");
+    NGLOG_WARNING(Kernel, "(STUBBED) called");
     return 0x8000000;
 }
 
 u64 VMManager::GetAddressSpaceSize() {
-    LOG_WARNING(Kernel, "(STUBBED) called");
+    NGLOG_WARNING(Kernel, "(STUBBED) called");
     return MAX_ADDRESS;
-}
-
-VAddr VMManager::GetNewMapRegionBaseAddr() {
-    LOG_WARNING(Kernel, "(STUBBED) called");
-    return 0x8000000;
-}
-
-u64 VMManager::GetNewMapRegionSize() {
-    LOG_WARNING(Kernel, "(STUBBED) called");
-    return 0x8000000;
 }
 
 } // namespace Kernel

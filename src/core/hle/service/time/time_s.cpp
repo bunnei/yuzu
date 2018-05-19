@@ -2,57 +2,30 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
-#include <chrono>
-#include "common/logging/log.h"
-#include "core/hle/ipc_helpers.h"
-#include "core/hle/kernel/client_port.h"
-#include "core/hle/kernel/client_session.h"
 #include "core/hle/service/time/time_s.h"
 
-namespace Service {
-namespace Time {
+namespace Service::Time {
 
-class ISystemClock final : public ServiceFramework<ISystemClock> {
-public:
-    ISystemClock() : ServiceFramework("ISystemClock") {
-        static const FunctionInfo functions[] = {
-            {0, &ISystemClock::GetCurrentTime, "GetCurrentTime"},
-        };
-        RegisterHandlers(functions);
-    }
-
-private:
-    void GetCurrentTime(Kernel::HLERequestContext& ctx) {
-        const s64 time_since_epoch{std::chrono::duration_cast<std::chrono::milliseconds>(
-                                       std::chrono::system_clock::now().time_since_epoch())
-                                       .count()};
-        IPC::RequestBuilder rb{ctx, 4};
-        rb.Push(RESULT_SUCCESS);
-        rb.Push<u64>(time_since_epoch);
-        LOG_DEBUG(Service, "called");
-    }
-};
-
-void TimeS::GetStandardUserSystemClock(Kernel::HLERequestContext& ctx) {
-    auto client_port = std::make_shared<ISystemClock>()->CreatePort();
-    auto session = client_port->Connect();
-    if (session.Succeeded()) {
-        LOG_DEBUG(Service, "called, initialized ISystemClock -> session=%u",
-                  (*session)->GetObjectId());
-        IPC::RequestBuilder rb{ctx, 2, 0, 1};
-        rb.Push(RESULT_SUCCESS);
-        rb.PushMoveObjects(std::move(session).Unwrap());
-    } else {
-        UNIMPLEMENTED();
-    }
-}
-
-TimeS::TimeS() : ServiceFramework("time:s") {
+TIME_S::TIME_S(std::shared_ptr<Module> time) : Module::Interface(std::move(time), "time:s") {
     static const FunctionInfo functions[] = {
-        {0x00000000, &TimeS::GetStandardUserSystemClock, "GetStandardUserSystemClock"},
+        {0, &TIME_S::GetStandardUserSystemClock, "GetStandardUserSystemClock"},
+        {1, &TIME_S::GetStandardNetworkSystemClock, "GetStandardNetworkSystemClock"},
+        {2, &TIME_S::GetStandardSteadyClock, "GetStandardSteadyClock"},
+        {3, &TIME_S::GetTimeZoneService, "GetTimeZoneService"},
+        {4, &TIME_S::GetStandardLocalSystemClock, "GetStandardLocalSystemClock"},
+        {5, nullptr, "GetEphemeralNetworkSystemClock"},
+        {50, nullptr, "SetStandardSteadyClockInternalOffset"},
+        {100, nullptr, "IsStandardUserSystemClockAutomaticCorrectionEnabled"},
+        {101, nullptr, "SetStandardUserSystemClockAutomaticCorrectionEnabled"},
+        {102, nullptr, "GetStandardUserSystemClockInitialYear"},
+        {200, nullptr, "IsStandardNetworkSystemClockAccuracySufficient"},
+        {300, nullptr, "CalculateMonotonicSystemClockBaseTimePoint"},
+        {400, nullptr, "GetClockSnapshot"},
+        {401, nullptr, "GetClockSnapshotFromSystemClockContext"},
+        {500, nullptr, "CalculateStandardUserSystemClockDifferenceByUser"},
+        {501, nullptr, "CalculateSpanBetween"},
     };
     RegisterHandlers(functions);
 }
 
-} // namespace Time
-} // namespace Service
+} // namespace Service::Time

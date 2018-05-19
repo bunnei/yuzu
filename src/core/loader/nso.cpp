@@ -2,12 +2,14 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <cinttypes>
 #include <vector>
 #include <lz4.h>
-
 #include "common/common_funcs.h"
+#include "common/file_util.h"
 #include "common/logging/log.h"
 #include "common/swap.h"
+#include "core/core.h"
 #include "core/hle/kernel/process.h"
 #include "core/hle/kernel/resource_limit.h"
 #include "core/loader/nso.h"
@@ -47,7 +49,10 @@ struct ModHeader {
 };
 static_assert(sizeof(ModHeader) == 0x1c, "ModHeader has incorrect size.");
 
-FileType AppLoader_NSO::IdentifyType(FileUtil::IOFile& file) {
+AppLoader_NSO::AppLoader_NSO(FileUtil::IOFile&& file, std::string filepath)
+    : AppLoader(std::move(file)), filepath(std::move(filepath)) {}
+
+FileType AppLoader_NSO::IdentifyType(FileUtil::IOFile& file, const std::string&) {
     u32 magic = 0;
     file.Seek(0, SEEK_SET);
     if (1 != file.ReadArray<u32>(&magic, 1)) {
@@ -68,7 +73,7 @@ static std::vector<u8> ReadSegment(FileUtil::IOFile& file, const NsoSegmentHeade
 
     file.Seek(header.offset, SEEK_SET);
     if (compressed_size != file.ReadBytes(compressed_data.data(), compressed_size)) {
-        LOG_CRITICAL(Loader, "Failed to read %d NSO LZ4 compressed bytes", compressed_size);
+        NGLOG_CRITICAL(Loader, "Failed to read {} NSO LZ4 compressed bytes", compressed_size);
         return {};
     }
 
@@ -79,7 +84,7 @@ static std::vector<u8> ReadSegment(FileUtil::IOFile& file, const NsoSegmentHeade
         reinterpret_cast<char*>(uncompressed_data.data()), compressed_size, header.size);
 
     ASSERT_MSG(bytes_uncompressed == header.size && bytes_uncompressed == uncompressed_data.size(),
-               "%d != %d != %d", bytes_uncompressed, header.size, uncompressed_data.size());
+               "{} != {} != {}", bytes_uncompressed, header.size, uncompressed_data.size());
 
     return uncompressed_data;
 }
@@ -88,7 +93,7 @@ static constexpr u32 PageAlignSize(u32 size) {
     return (size + Memory::PAGE_MASK) & ~Memory::PAGE_MASK;
 }
 
-VAddr AppLoader_NSO::LoadNso(const std::string& path, VAddr load_base, bool relocate) {
+VAddr AppLoader_NSO::LoadModule(const std::string& path, VAddr load_base) {
     FileUtil::IOFile file(path, "rb");
     if (!file.IsOpen()) {
         return {};
@@ -105,7 +110,7 @@ VAddr AppLoader_NSO::LoadNso(const std::string& path, VAddr load_base, bool relo
     }
 
     // Build program image
-    Kernel::SharedPtr<Kernel::CodeSet> codeset = Kernel::CodeSet::Create("", 0);
+    Kernel::SharedPtr<Kernel::CodeSet> codeset = Kernel::CodeSet::Create("");
     std::vector<u8> program_image;
     for (int i = 0; i < nso_header.segments.size(); ++i) {
         std::vector<u8> data =
@@ -135,16 +140,10 @@ VAddr AppLoader_NSO::LoadNso(const std::string& path, VAddr load_base, bool relo
     const u32 image_size{PageAlignSize(static_cast<u32>(program_image.size()) + bss_size)};
     program_image.resize(image_size);
 
-    // Relocate symbols if there was a proper MOD header - This must happen after the image has been
-    // loaded into memory
-    if (has_mod_header && relocate) {
-        Relocate(program_image, module_offset + mod_header.dynamic_offset, load_base);
-    }
-
     // Load codeset for current process
     codeset->name = path;
     codeset->memory = std::make_shared<std::vector<u8>>(std::move(program_image));
-    Kernel::g_current_process->LoadModule(codeset, load_base);
+    Core::CurrentProcess()->LoadModule(codeset, load_base);
 
     return load_base + image_size;
 }
@@ -157,31 +156,15 @@ ResultStatus AppLoader_NSO::Load(Kernel::SharedPtr<Kernel::Process>& process) {
         return ResultStatus::Error;
     }
 
-    process = Kernel::Process::Create("main");
-
-    // Load NSO modules
-    VAddr next_load_addr{Memory::PROCESS_IMAGE_VADDR};
-    for (const auto& module :
-         {"rtld", "sdk", "subsdk0", "subsdk1", "subsdk2", "subsdk3", "subsdk4"}) {
-        const std::string path = filepath.substr(0, filepath.find_last_of("/\\")) + "/" + module;
-        const VAddr load_addr = next_load_addr;
-        next_load_addr = LoadNso(path, load_addr);
-        if (next_load_addr) {
-            LOG_DEBUG(Loader, "loaded module %s @ 0x%llx", module, load_addr);
-        } else {
-            next_load_addr = load_addr;
-        }
-    }
-    // Load "main" module
-    LoadNso(filepath, next_load_addr);
+    // Load module
+    LoadModule(filepath, Memory::PROCESS_IMAGE_VADDR);
+    NGLOG_DEBUG(Loader, "loaded module {} @ 0x{:X}", filepath, Memory::PROCESS_IMAGE_VADDR);
 
     process->svc_access_mask.set();
     process->address_mappings = default_address_mappings;
     process->resource_limit =
         Kernel::ResourceLimit::GetForCategory(Kernel::ResourceLimitCategory::APPLICATION);
-    process->Run(Memory::PROCESS_IMAGE_VADDR, 48, Kernel::DEFAULT_STACK_SIZE);
-
-    ResolveImports();
+    process->Run(Memory::PROCESS_IMAGE_VADDR, THREADPRIO_DEFAULT, Memory::DEFAULT_STACK_SIZE);
 
     is_loaded = true;
     return ResultStatus::Success;

@@ -8,7 +8,7 @@ namespace DefaultINI {
 
 const char* sdl2_config_file = R"(
 [Controls]
-# The input devices and parameters for each 3DS native input
+# The input devices and parameters for each Switch native input
 # It should be in the format of "engine:[engine_name],[param1]:[value1],[param2]:[value2]..."
 # Escape characters $0 (for ':'), $1 (for ',') and $2 (for '$') can be used in values
 
@@ -76,9 +76,13 @@ motion_device=
 touch_device=
 
 [Core]
-# Which CPU core to use for CPU emulation
-# 0 (default): Unicorn (slow), 1: Dynarmic (faster)
-cpu_core =
+# Whether to use the Just-In-Time (JIT) compiler for CPU emulation
+# 0: Interpreter (slow), 1 (default): JIT (fast)
+use_cpu_jit =
+
+# Whether to use multi-core for CPU emulation
+# 0 (default): Disabled, 1: Enabled
+use_multi_core=
 
 [Renderer]
 # Whether to use software or hardware rendering.
@@ -124,8 +128,8 @@ custom_bottom_top =
 custom_bottom_right =
 custom_bottom_bottom =
 
-#Whether to toggle frame limiter on or off.
-# 0: Off , 1  (default): On
+# Whether to toggle frame limiter on or off.
+# 0: Off, 1 (default): On
 toggle_framelimit =
 
 # Swaps the prominent screen with the other screen.
@@ -154,9 +158,9 @@ output_device =
 use_virtual_sd =
 
 [System]
-# The system model that Citra will try to emulate
-# 0: Old 3DS (default), 1: New 3DS
-is_new_3ds =
+# Whether the system is docked
+# 1 (default): Yes, 0: No
+use_docked_mode =
 
 # The system region that Citra will use during emulation
 # -1: Auto-select (default), 0: Japan, 1: USA, 2: Europe, 3: Australia, 4: China, 5: Korea, 6: Taiwan
@@ -177,12 +181,12 @@ gdbstub_port=24689
 # 0: No, 1 (default): Yes
 enable_telemetry =
 # Endpoint URL for submitting telemetry data
-telemetry_endpoint_url = https://services.citra-emu.org/api/telemetry
+telemetry_endpoint_url =
 # Endpoint URL to verify the username and token
-verify_endpoint_url = https://services.citra-emu.org/api/profile
-# Username and token for Citra Web Service
+verify_endpoint_url =
+# Username and token for yuzu Web Service
 # See https://services.citra-emu.org/ for more info
-citra_username =
-citra_token =
+yuzu_username =
+yuzu_token =
 )";
 }

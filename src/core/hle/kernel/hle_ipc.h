@@ -6,6 +6,7 @@
 
 #include <array>
 #include <memory>
+#include <string>
 #include <vector>
 #include <boost/container/small_vector.hpp>
 #include "common/common_types.h"
@@ -13,6 +14,7 @@
 #include "core/hle/ipc.h"
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/kernel/server_session.h"
+#include "core/hle/kernel/thread.h"
 
 namespace Service {
 class ServiceFrameworkBase;
@@ -24,6 +26,7 @@ class Domain;
 class HandleTable;
 class HLERequestContext;
 class Process;
+class Event;
 
 /**
  * Interface implemented by HLE Session handlers.
@@ -86,7 +89,6 @@ protected:
  */
 class HLERequestContext {
 public:
-    HLERequestContext(SharedPtr<Kernel::Domain> domain);
     HLERequestContext(SharedPtr<Kernel::ServerSession> session);
     ~HLERequestContext();
 
@@ -96,19 +98,30 @@ public:
     }
 
     /**
-     * Returns the domain through which this request was made.
-     */
-    const SharedPtr<Kernel::Domain>& Domain() const {
-        return domain;
-    }
-
-    /**
      * Returns the session through which this request was made. This can be used as a map key to
      * access per-client data on services.
      */
-    const SharedPtr<Kernel::ServerSession>& ServerSession() const {
+    const SharedPtr<Kernel::ServerSession>& Session() const {
         return server_session;
     }
+
+    using WakeupCallback = std::function<void(SharedPtr<Thread> thread, HLERequestContext& context,
+                                              ThreadWakeupReason reason)>;
+
+    /**
+     * Puts the specified guest thread to sleep until the returned event is signaled or until the
+     * specified timeout expires.
+     * @param thread Thread to be put to sleep.
+     * @param reason Reason for pausing the thread, to be used for debugging purposes.
+     * @param timeout Timeout in nanoseconds after which the thread will be awoken and the callback
+     * invoked with a Timeout reason.
+     * @param callback Callback to be invoked when the thread is resumed. This callback must write
+     * the entire command response once again, regardless of the state of it before this function
+     * was called.
+     * @returns Event that when signaled will resume the thread and call the callback function.
+     */
+    SharedPtr<Event> SleepClientThread(SharedPtr<Thread> thread, const std::string& reason,
+                                       u64 timeout, WakeupCallback&& callback);
 
     void ParseCommandBuffer(u32_le* src_cmdbuf, bool incoming);
 
@@ -116,8 +129,7 @@ public:
     ResultCode PopulateFromIncomingCommandBuffer(u32_le* src_cmdbuf, Process& src_process,
                                                  HandleTable& src_table);
     /// Writes data from this context back to the requesting process/thread.
-    ResultCode WriteToOutgoingCommandBuffer(u32_le* dst_cmdbuf, Process& dst_process,
-                                            HandleTable& dst_table);
+    ResultCode WriteToOutgoingCommandBuffer(Thread& thread);
 
     u32_le GetCommand() const {
         return command;
@@ -143,13 +155,28 @@ public:
         return buffer_b_desciptors;
     }
 
-    const std::unique_ptr<IPC::DomainMessageHeader>& GetDomainMessageHeader() const {
+    const std::vector<IPC::BufferDescriptorC>& BufferDescriptorC() const {
+        return buffer_c_desciptors;
+    }
+
+    const std::shared_ptr<IPC::DomainMessageHeader>& GetDomainMessageHeader() const {
         return domain_message_header;
     }
 
-    bool IsDomain() const {
-        return domain != nullptr;
-    }
+    /// Helper function to read a buffer using the appropriate buffer descriptor
+    std::vector<u8> ReadBuffer(int buffer_index = 0) const;
+
+    /// Helper function to write a buffer using the appropriate buffer descriptor
+    size_t WriteBuffer(const void* buffer, size_t size, int buffer_index = 0) const;
+
+    /// Helper function to write a buffer using the appropriate buffer descriptor
+    size_t WriteBuffer(const std::vector<u8>& buffer, int buffer_index = 0) const;
+
+    /// Helper function to get the size of the input buffer
+    size_t GetReadBufferSize(int buffer_index = 0) const;
+
+    /// Helper function to get the size of the output buffer
+    size_t GetWriteBufferSize(int buffer_index = 0) const;
 
     template <typename T>
     SharedPtr<T> GetCopyObject(size_t index) {
@@ -175,26 +202,61 @@ public:
         domain_objects.emplace_back(std::move(object));
     }
 
+    template <typename T>
+    std::shared_ptr<T> GetDomainRequestHandler(size_t index) const {
+        return std::static_pointer_cast<T>(domain_request_handlers[index]);
+    }
+
+    void SetDomainRequestHandlers(
+        const std::vector<std::shared_ptr<SessionRequestHandler>>& handlers) {
+        domain_request_handlers = handlers;
+    }
+
+    /// Clears the list of objects so that no lingering objects are written accidentally to the
+    /// response buffer.
+    void ClearIncomingObjects() {
+        move_objects.clear();
+        copy_objects.clear();
+        domain_objects.clear();
+    }
+
+    size_t NumMoveObjects() const {
+        return move_objects.size();
+    }
+
+    size_t NumCopyObjects() const {
+        return copy_objects.size();
+    }
+
+    size_t NumDomainObjects() const {
+        return domain_objects.size();
+    }
+
+    std::string Description() const;
+
 private:
     std::array<u32, IPC::COMMAND_BUFFER_LENGTH> cmd_buf;
-    SharedPtr<Kernel::Domain> domain;
     SharedPtr<Kernel::ServerSession> server_session;
     // TODO(yuriks): Check common usage of this and optimize size accordingly
     boost::container::small_vector<SharedPtr<Object>, 8> move_objects;
     boost::container::small_vector<SharedPtr<Object>, 8> copy_objects;
     boost::container::small_vector<std::shared_ptr<SessionRequestHandler>, 8> domain_objects;
 
-    std::unique_ptr<IPC::CommandHeader> command_header;
-    std::unique_ptr<IPC::HandleDescriptorHeader> handle_descriptor_header;
-    std::unique_ptr<IPC::DataPayloadHeader> data_payload_header;
-    std::unique_ptr<IPC::DomainMessageHeader> domain_message_header;
+    std::shared_ptr<IPC::CommandHeader> command_header;
+    std::shared_ptr<IPC::HandleDescriptorHeader> handle_descriptor_header;
+    std::shared_ptr<IPC::DataPayloadHeader> data_payload_header;
+    std::shared_ptr<IPC::DomainMessageHeader> domain_message_header;
     std::vector<IPC::BufferDescriptorX> buffer_x_desciptors;
     std::vector<IPC::BufferDescriptorABW> buffer_a_desciptors;
     std::vector<IPC::BufferDescriptorABW> buffer_b_desciptors;
     std::vector<IPC::BufferDescriptorABW> buffer_w_desciptors;
+    std::vector<IPC::BufferDescriptorC> buffer_c_desciptors;
 
     unsigned data_payload_offset{};
+    unsigned buffer_c_offset{};
     u32_le command{};
+
+    std::vector<std::shared_ptr<SessionRequestHandler>> domain_request_handlers;
 };
 
 } // namespace Kernel

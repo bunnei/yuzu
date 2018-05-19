@@ -12,9 +12,7 @@
 #include "common/swap.h"
 #include "core/hle/service/nvdrv/devices/nvdevice.h"
 
-namespace Service {
-namespace NVDRV {
-namespace Devices {
+namespace Service::Nvidia::Devices {
 
 class nvmap final : public nvdevice {
 public:
@@ -24,10 +22,9 @@ public:
     /// Returns the allocated address of an nvmap object given its handle.
     VAddr GetObjectAddress(u32 handle) const;
 
-    u32 ioctl(u32 command, const std::vector<u8>& input, std::vector<u8>& output) override;
+    u32 ioctl(Ioctl command, const std::vector<u8>& input, std::vector<u8>& output) override;
 
-private:
-    // Represents an nvmap object.
+    /// Represents an nvmap object.
     struct Object {
         enum class Status { Created, Allocated };
         u32 id;
@@ -39,21 +36,30 @@ private:
         Status status;
     };
 
+    std::shared_ptr<Object> GetObject(u32 handle) const {
+        auto itr = handles.find(handle);
+        if (itr != handles.end()) {
+            return itr->second;
+        }
+        return {};
+    }
+
+private:
     /// Id to use for the next handle that is created.
     u32 next_handle = 1;
 
-    // Id to use for the next object that is created.
+    /// Id to use for the next object that is created.
     u32 next_id = 1;
 
     /// Mapping of currently allocated handles to the objects they represent.
     std::unordered_map<u32, std::shared_ptr<Object>> handles;
 
-    enum IoctlCommands {
-        IocCreateCommand = 0xC0080101,
-        IocFromIdCommand = 0xC0080103,
-        IocAllocCommand = 0xC0200104,
-        IocParamCommand = 0xC00C0109,
-        IocGetIdCommand = 0xC008010E
+    enum class IoctlCommand : u32 {
+        Create = 0xC0080101,
+        FromId = 0xC0080103,
+        Alloc = 0xC0200104,
+        Param = 0xC00C0109,
+        GetId = 0xC008010E
     };
 
     struct IocCreateParams {
@@ -103,6 +109,4 @@ private:
     u32 IocParam(const std::vector<u8>& input, std::vector<u8>& output);
 };
 
-} // namespace Devices
-} // namespace NVDRV
-} // namespace Service
+} // namespace Service::Nvidia::Devices

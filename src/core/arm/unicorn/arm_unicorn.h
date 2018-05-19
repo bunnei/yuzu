@@ -14,6 +14,7 @@ public:
     ~ARM_Unicorn();
     void MapBackingMemory(VAddr address, size_t size, u8* memory,
                           Kernel::VMAPermission perms) override;
+    void UnmapMemory(VAddr address, size_t size) override;
     void SetPC(u64 pc) override;
     u64 GetPC() const override;
     u64 GetReg(int index) const override;
@@ -29,7 +30,9 @@ public:
     void SaveContext(ThreadContext& ctx) override;
     void LoadContext(const ThreadContext& ctx) override;
     void PrepareReschedule() override;
-    void ExecuteInstructions(int num_instructions) override;
+    void ExecuteInstructions(int num_instructions);
+    void Run() override;
+    void Step() override;
     void ClearInstructionCache() override;
     void PageTableChanged() override{};
 

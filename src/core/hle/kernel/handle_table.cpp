@@ -5,12 +5,11 @@
 #include <utility>
 #include "common/assert.h"
 #include "common/logging/log.h"
-#include "core/hle/kernel/client_session.h"
+#include "core/core.h"
 #include "core/hle/kernel/errors.h"
 #include "core/hle/kernel/handle_table.h"
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/kernel/process.h"
-#include "core/hle/kernel/session.h"
 #include "core/hle/kernel/thread.h"
 
 namespace Kernel {
@@ -27,7 +26,7 @@ ResultVal<Handle> HandleTable::Create(SharedPtr<Object> obj) {
 
     u16 slot = next_free_slot;
     if (slot >= generations.size()) {
-        LOG_ERROR(Kernel, "Unable to allocate Handle, too many slots in use.");
+        NGLOG_ERROR(Kernel, "Unable to allocate Handle, too many slots in use.");
         return ERR_OUT_OF_HANDLES;
     }
     next_free_slot = generations[slot];
@@ -49,18 +48,10 @@ ResultVal<Handle> HandleTable::Create(SharedPtr<Object> obj) {
 ResultVal<Handle> HandleTable::Duplicate(Handle handle) {
     SharedPtr<Object> object = GetGeneric(handle);
     if (object == nullptr) {
-        LOG_ERROR(Kernel, "Tried to duplicate invalid handle: %08X", handle);
+        NGLOG_ERROR(Kernel, "Tried to duplicate invalid handle: {:08X}", handle);
         return ERR_INVALID_HANDLE;
     }
     return Create(std::move(object));
-}
-
-void HandleTable::ConvertSessionToDomain(const Session& session, SharedPtr<Object> domain) {
-    for (auto& object : objects) {
-        if (DynamicObjectCast<ClientSession>(object) == session.client) {
-            object = domain;
-        }
-    }
 }
 
 ResultCode HandleTable::Close(Handle handle) {
@@ -87,7 +78,7 @@ SharedPtr<Object> HandleTable::GetGeneric(Handle handle) const {
     if (handle == CurrentThread) {
         return GetCurrentThread();
     } else if (handle == CurrentProcess) {
-        return g_current_process;
+        return Core::CurrentProcess();
     }
 
     if (!IsValid(handle)) {
@@ -104,4 +95,4 @@ void HandleTable::Clear() {
     next_free_slot = 0;
 }
 
-} // namespace
+} // namespace Kernel

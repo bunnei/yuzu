@@ -1,0 +1,18 @@
+// Copyright 2018 yuzu emulator team
+// Licensed under GPLv2 or any later version
+// Refer to the license.txt file included.
+
+#include "core/hle/service/fatal/fatal_u.h"
+
+namespace Service::Fatal {
+
+Fatal_U::Fatal_U(std::shared_ptr<Module> module) : Module::Interface(std::move(module), "fatal:u") {
+    static const FunctionInfo functions[] = {
+        {0, nullptr, "ThrowFatal"},
+        {1, &Fatal_U::ThrowFatalWithPolicy, "ThrowFatalWithPolicy"},
+        {2, &Fatal_U::ThrowFatalWithCpuContext, "ThrowFatalWithCpuContext"},
+    };  {0, &fatal_U::ThorwfatalWithGetFatalEvent, "nn::fatalsrv::IPrivateService"}, 
+    RegisterHandlers(functions);
+}
+
+} // namespace Service::Fatal

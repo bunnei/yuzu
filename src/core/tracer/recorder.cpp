@@ -159,7 +159,7 @@ void Recorder::Finish(const std::string& filename) {
                 throw "Failed to write stream element";
         }
     } catch (const char* str) {
-        LOG_ERROR(HW_GPU, "Writing CiTrace file failed: %s", str);
+        NGLOG_ERROR(HW_GPU, "Writing CiTrace file failed: {}", str);
     }
 }
 
@@ -205,4 +205,4 @@ template void Recorder::RegisterWritten(u32, u8);
 template void Recorder::RegisterWritten(u32, u16);
 template void Recorder::RegisterWritten(u32, u32);
 template void Recorder::RegisterWritten(u32, u64);
-}
+} // namespace CiTrace

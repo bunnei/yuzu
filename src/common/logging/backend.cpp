@@ -2,15 +2,13 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
-#include <algorithm>
-#include <array>
-#include <cstdio>
+#include <utility>
 #include "common/assert.h"
-#include "common/common_funcs.h" // snprintf compatibility define
 #include "common/logging/backend.h"
 #include "common/logging/filter.h"
 #include "common/logging/log.h"
 #include "common/logging/text_formatter.h"
+#include "common/string_util.h"
 
 namespace Log {
 
@@ -32,17 +30,34 @@ namespace Log {
     CLS(Kernel)                                                                                    \
     SUB(Kernel, SVC)                                                                               \
     CLS(Service)                                                                                   \
-    SUB(Service, SM)                                                                               \
+    SUB(Service, ACC)                                                                              \
+    SUB(Service, Audio)                                                                            \
+    SUB(Service, AM)                                                                               \
+    SUB(Service, AOC)                                                                              \
+    SUB(Service, APM)                                                                              \
+    SUB(Service, Fatal)                                                                            \
+    SUB(Service, Friend)                                                                           \
     SUB(Service, FS)                                                                               \
-    SUB(Service, GSP)                                                                              \
-    SUB(Service, CFG)                                                                              \
-    SUB(Service, DSP)                                                                              \
     SUB(Service, HID)                                                                              \
+    SUB(Service, LM)                                                                               \
+    SUB(Service, NFP)                                                                              \
+    SUB(Service, NIFM)                                                                             \
+    SUB(Service, NS)                                                                               \
+    SUB(Service, NVDRV)                                                                            \
+    SUB(Service, PCTL)                                                                             \
+    SUB(Service, PREPO)                                                                            \
+    SUB(Service, SET)                                                                              \
+    SUB(Service, SM)                                                                               \
+    SUB(Service, SPL)                                                                              \
+    SUB(Service, SSL)                                                                              \
+    SUB(Service, Time)                                                                             \
+    SUB(Service, VI)                                                                               \
     CLS(HW)                                                                                        \
     SUB(HW, Memory)                                                                                \
     SUB(HW, LCD)                                                                                   \
     SUB(HW, GPU)                                                                                   \
     SUB(HW, AES)                                                                                   \
+    CLS(IPC)                                                                                       \
     CLS(Frontend)                                                                                  \
     CLS(Render)                                                                                    \
     SUB(Render, Software)                                                                          \
@@ -90,25 +105,20 @@ const char* GetLevelName(Level log_level) {
 }
 
 Entry CreateEntry(Class log_class, Level log_level, const char* filename, unsigned int line_nr,
-                  const char* function, const char* format, va_list args) {
-    using std::chrono::steady_clock;
+                  const char* function, std::string message) {
     using std::chrono::duration_cast;
+    using std::chrono::steady_clock;
 
     static steady_clock::time_point time_origin = steady_clock::now();
-
-    std::array<char, 4 * 1024> formatting_buffer;
 
     Entry entry;
     entry.timestamp = duration_cast<std::chrono::microseconds>(steady_clock::now() - time_origin);
     entry.log_class = log_class;
     entry.log_level = log_level;
-
-    snprintf(formatting_buffer.data(), formatting_buffer.size(), "%s:%s:%u", filename, function,
-             line_nr);
-    entry.location = std::string(formatting_buffer.data());
-
-    vsnprintf(formatting_buffer.data(), formatting_buffer.size(), format, args);
-    entry.message = std::string(formatting_buffer.data());
+    entry.filename = Common::TrimSourcePath(filename);
+    entry.line_num = line_nr;
+    entry.function = function;
+    entry.message = std::move(message);
 
     return entry;
 }
@@ -119,16 +129,14 @@ void SetFilter(Filter* new_filter) {
     filter = new_filter;
 }
 
-void LogMessage(Class log_class, Level log_level, const char* filename, unsigned int line_nr,
-                const char* function, const char* format, ...) {
-    if (filter != nullptr && !filter->CheckMessage(log_class, log_level))
+void FmtLogMessageImpl(Class log_class, Level log_level, const char* filename,
+                       unsigned int line_num, const char* function, const char* format,
+                       const fmt::format_args& args) {
+    if (filter && !filter->CheckMessage(log_class, log_level))
         return;
-
-    va_list args;
-    va_start(args, format);
-    Entry entry = CreateEntry(log_class, log_level, filename, line_nr, function, format, args);
-    va_end(args);
+    Entry entry =
+        CreateEntry(log_class, log_level, filename, line_num, function, fmt::vformat(format, args));
 
     PrintColoredMessage(entry);
 }
-}
+} // namespace Log

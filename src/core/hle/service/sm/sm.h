@@ -17,14 +17,13 @@ class ServerPort;
 class SessionRequestHandler;
 } // namespace Kernel
 
-namespace Service {
-namespace SM {
+namespace Service::SM {
 
 /// Interface to "sm:" service
 class SM final : public ServiceFramework<SM> {
 public:
     SM(std::shared_ptr<ServiceManager> service_manager);
-    ~SM() = default;
+    ~SM() override;
 
 private:
     void Initialize(Kernel::HLERequestContext& ctx);
@@ -45,6 +44,8 @@ class ServiceManager {
 public:
     static void InstallInterfaces(std::shared_ptr<ServiceManager> self);
 
+    ~ServiceManager();
+
     ResultVal<Kernel::SharedPtr<Kernel::ServerPort>> RegisterService(std::string name,
                                                                      unsigned int max_sessions);
     ResultVal<Kernel::SharedPtr<Kernel::ClientPort>> GetServicePort(const std::string& name);
@@ -60,7 +61,4 @@ private:
     std::unordered_map<std::string, Kernel::SharedPtr<Kernel::ClientPort>> registered_services;
 };
 
-extern std::shared_ptr<ServiceManager> g_service_manager;
-
-} // namespace SM
-} // namespace Service
+} // namespace Service::SM

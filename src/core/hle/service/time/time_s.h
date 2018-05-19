@@ -4,20 +4,13 @@
 
 #pragma once
 
-#include "core/hle/kernel/hle_ipc.h"
-#include "core/hle/service/service.h"
+#include "core/hle/service/time/time.h"
 
-namespace Service {
-namespace Time {
+namespace Service::Time {
 
-class TimeS final : public ServiceFramework<TimeS> {
+class TIME_S final : public Module::Interface {
 public:
-    TimeS();
-    ~TimeS() = default;
-
-private:
-    void GetStandardUserSystemClock(Kernel::HLERequestContext& ctx);
+    explicit TIME_S(std::shared_ptr<Module> time);
 };
 
-} // namespace Time
-} // namespace Service
+} // namespace Service::Time

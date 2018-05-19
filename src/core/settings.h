@@ -99,17 +99,20 @@ enum Values {
     NumAnalogs,
 };
 
+constexpr int STICK_HID_BEGIN = LStick;
+constexpr int STICK_HID_END = NumAnalogs;
+constexpr int NUM_STICKS_HID = NumAnalogs;
+
 static const std::array<const char*, NumAnalogs> mapping = {{
-    "lstick", "rstick",
+    "lstick",
+    "rstick",
 }};
 } // namespace NativeAnalog
 
-enum class CpuCore {
-    Unicorn,
-    Dynarmic,
-};
-
 struct Values {
+    // System
+    bool use_docked_mode;
+
     // Controls
     std::array<std::string, NativeButton::NumButtons> buttons;
     std::array<std::string, NativeAnalog::NumAnalogs> analogs;
@@ -117,7 +120,8 @@ struct Values {
     std::string touch_device;
 
     // Core
-    CpuCore cpu_core;
+    bool use_cpu_jit;
+    bool use_multi_core;
 
     // Data Storage
     bool use_virtual_sd;

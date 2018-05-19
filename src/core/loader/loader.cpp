@@ -1,4 +1,4 @@
-// Copyright 2014 Citra Emulator Project
+// Copyright 2018 yuzu emulator team
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
@@ -7,11 +7,10 @@
 #include "common/logging/log.h"
 #include "common/string_util.h"
 #include "core/hle/kernel/process.h"
+#include "core/loader/deconstructed_rom_directory.h"
 #include "core/loader/elf.h"
 #include "core/loader/nro.h"
 #include "core/loader/nso.h"
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
 
 namespace Loader {
 
@@ -21,14 +20,15 @@ const std::initializer_list<Kernel::AddressMapping> default_address_mappings = {
     {0x1F000000, 0x600000, false}, // entire VRAM
 };
 
-FileType IdentifyFile(FileUtil::IOFile& file) {
+FileType IdentifyFile(FileUtil::IOFile& file, const std::string& filepath) {
     FileType type;
 
 #define CHECK_TYPE(loader)                                                                         \
-    type = AppLoader_##loader::IdentifyType(file);                                                 \
+    type = AppLoader_##loader::IdentifyType(file, filepath);                                       \
     if (FileType::Error != type)                                                                   \
         return type;
 
+    CHECK_TYPE(DeconstructedRomDirectory)
     CHECK_TYPE(ELF)
     CHECK_TYPE(NSO)
     CHECK_TYPE(NRO)
@@ -41,17 +41,17 @@ FileType IdentifyFile(FileUtil::IOFile& file) {
 FileType IdentifyFile(const std::string& file_name) {
     FileUtil::IOFile file(file_name, "rb");
     if (!file.IsOpen()) {
-        LOG_ERROR(Loader, "Failed to load file %s", file_name.c_str());
+        NGLOG_ERROR(Loader, "Failed to load file {}", file_name);
         return FileType::Unknown;
     }
 
-    return IdentifyFile(file);
+    return IdentifyFile(file, file_name);
 }
 
 FileType GuessFromExtension(const std::string& extension_) {
     std::string extension = Common::ToLower(extension_);
 
-    if (extension == ".elf" || extension == ".axf")
+    if (extension == ".elf")
         return FileType::ELF;
     else if (extension == ".nro")
         return FileType::NRO;
@@ -69,6 +69,8 @@ const char* GetFileTypeString(FileType type) {
         return "NRO";
     case FileType::NSO:
         return "NSO";
+    case FileType::DeconstructedRomDirectory:
+        return "Directory";
     case FileType::Error:
     case FileType::Unknown:
         break;
@@ -102,6 +104,10 @@ static std::unique_ptr<AppLoader> GetFileLoader(FileUtil::IOFile&& file, FileTyp
     case FileType::NRO:
         return std::make_unique<AppLoader_NRO>(std::move(file), filepath);
 
+    // NX deconstructed ROM directory.
+    case FileType::DeconstructedRomDirectory:
+        return std::make_unique<AppLoader_DeconstructedRomDirectory>(std::move(file), filepath);
+
     default:
         return nullptr;
     }
@@ -110,23 +116,23 @@ static std::unique_ptr<AppLoader> GetFileLoader(FileUtil::IOFile&& file, FileTyp
 std::unique_ptr<AppLoader> GetLoader(const std::string& filename) {
     FileUtil::IOFile file(filename, "rb");
     if (!file.IsOpen()) {
-        LOG_ERROR(Loader, "Failed to load file %s", filename.c_str());
+        NGLOG_ERROR(Loader, "Failed to load file {}", filename);
         return nullptr;
     }
 
     std::string filename_filename, filename_extension;
     Common::SplitPath(filename, nullptr, &filename_filename, &filename_extension);
 
-    FileType type = IdentifyFile(file);
+    FileType type = IdentifyFile(file, filename);
     FileType filename_type = GuessFromExtension(filename_extension);
 
     if (type != filename_type) {
-        LOG_WARNING(Loader, "File %s has a different type than its extension.", filename.c_str());
+        NGLOG_WARNING(Loader, "File {} has a different type than its extension.", filename);
         if (FileType::Unknown == type)
             type = filename_type;
     }
 
-    LOG_DEBUG(Loader, "Loading file %s as %s...", filename.c_str(), GetFileTypeString(type));
+    NGLOG_DEBUG(Loader, "Loading file {} as {}...", filename, GetFileTypeString(type));
 
     return GetFileLoader(std::move(file), type, filename_filename, filename);
 }
