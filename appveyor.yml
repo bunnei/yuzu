@@ -16,6 +16,7 @@ environment:
     - BUILD_TYPE: mingw
     - BUILD_TYPE: msvc
 
+
 platform:
   - x64
 
