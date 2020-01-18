@@ -72,6 +72,21 @@ private:
     EffectOutStatus out_status{};
     EffectInStatus info{};
 };
+
+class AudioRenderer::ChannelState {
+public:
+    const ChannelInfoIn& GetInfo() const {
+        return info;
+    }
+
+    ChannelInfoIn& GetInfo() {
+        return info;
+    }
+
+private:
+    ChannelInfoIn info{};
+};
+
 AudioRenderer::AudioRenderer(Core::Timing::CoreTiming& core_timing, Memory::Memory& memory_,
                              AudioRendererParameter params,
                              std::shared_ptr<Kernel::WritableEvent> buffer_event,
@@ -131,6 +146,15 @@ std::vector<u8> AudioRenderer::UpdateAudioRenderer(const std::vector<u8>& input_
     for (auto& voice : voices) {
         std::memcpy(&voice.GetInfo(), input_params.data() + voice_offset, sizeof(VoiceInfo));
         voice_offset += sizeof(VoiceInfo);
+    }
+
+    std::size_t channel_offset{sizeof(UpdateDataHeader) + config.behavior_size +
+                               config.memory_pools_size};
+    channels.resize((voice_offset - channel_offset) / sizeof(ChannelInfoIn));
+    for (auto& channel : channels) {
+        std::memcpy(&channel.GetInfo(), input_params.data() + channel_offset,
+                    sizeof(ChannelInfoIn));
+        channel_offset += sizeof(ChannelInfoIn);
     }
 
     std::size_t effect_offset{sizeof(UpdateDataHeader) + config.behavior_size +
@@ -351,10 +375,16 @@ void AudioRenderer::QueueMixedBuffer(Buffer::Tag tag) {
 
             samples_remaining -= samples.size() / stream->GetNumChannels();
 
+            // TODO(FearlessTobi): Implement Surround mixing
+            const auto& mix = channels[voice.GetInfo().id].GetInfo().mix;
             for (const auto& sample : samples) {
                 const s32 buffer_sample{buffer[offset]};
-                buffer[offset++] =
-                    ClampToS16(buffer_sample + static_cast<s32>(sample * voice.GetInfo().volume));
+
+                // index 0 is for the left ear, 1 is for the right
+                const float submix = mix[offset % 2];
+
+                buffer[offset++] = ClampToS16(
+                    buffer_sample + static_cast<s32>(sample * voice.GetInfo().volume * submix));
             }
         }
     }
