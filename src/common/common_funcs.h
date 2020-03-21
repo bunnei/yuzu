@@ -55,6 +55,68 @@ __declspec(dllimport) void __stdcall DebugBreak(void);
 // Defined in Misc.cpp.
 std::string GetLastErrorMsg();
 
+extern "C++" {
+
+template <size_t S>
+struct _ENUM_FLAG_INTEGER;
+
+template <>
+struct _ENUM_FLAG_INTEGER<1> {
+    typedef int8_t type;
+};
+
+template <>
+struct _ENUM_FLAG_INTEGER<2> {
+    typedef int16_t type;
+};
+
+template <>
+struct _ENUM_FLAG_INTEGER<4> {
+    typedef int32_t type;
+};
+
+template <>
+struct _ENUM_FLAG_INTEGER<8> {
+    typedef int64_t type;
+};
+
+template <class T>
+struct _ENUM_FLAG_SIZED {
+    typedef typename _ENUM_FLAG_INTEGER<sizeof(T)>::type type;
+};
+}
+
+#define DECLARE_ENUM_FLAG_OPERATORS(ENUMTYPE)                                                      \
+    extern "C++" {                                                                                 \
+    constexpr ENUMTYPE operator|(ENUMTYPE a, ENUMTYPE b) {                                         \
+        return ENUMTYPE(((_ENUM_FLAG_SIZED<ENUMTYPE>::type)a) |                                    \
+                        ((_ENUM_FLAG_SIZED<ENUMTYPE>::type)b));                                    \
+    }                                                                                              \
+    constexpr ENUMTYPE& operator|=(ENUMTYPE& a, ENUMTYPE b) {                                      \
+        return (ENUMTYPE&)(((_ENUM_FLAG_SIZED<ENUMTYPE>::type&)a) |=                               \
+                           ((_ENUM_FLAG_SIZED<ENUMTYPE>::type)b));                                 \
+    }                                                                                              \
+    constexpr ENUMTYPE operator&(ENUMTYPE a, ENUMTYPE b) {                                         \
+        return ENUMTYPE(((_ENUM_FLAG_SIZED<ENUMTYPE>::type)a) &                                    \
+                        ((_ENUM_FLAG_SIZED<ENUMTYPE>::type)b));                                    \
+    }                                                                                              \
+    constexpr ENUMTYPE& operator&=(ENUMTYPE& a, ENUMTYPE b) {                                      \
+        return (ENUMTYPE&)(((_ENUM_FLAG_SIZED<ENUMTYPE>::type&)a) &=                               \
+                           ((_ENUM_FLAG_SIZED<ENUMTYPE>::type)b));                                 \
+    }                                                                                              \
+    constexpr ENUMTYPE operator~(ENUMTYPE a) {                                                     \
+        return ENUMTYPE(~((_ENUM_FLAG_SIZED<ENUMTYPE>::type)a));                                   \
+    }                                                                                              \
+    constexpr ENUMTYPE operator^(ENUMTYPE a, ENUMTYPE b) {                                         \
+        return ENUMTYPE(((_ENUM_FLAG_SIZED<ENUMTYPE>::type)a) ^                                    \
+                        ((_ENUM_FLAG_SIZED<ENUMTYPE>::type)b));                                    \
+    }                                                                                              \
+    constexpr ENUMTYPE& operator^=(ENUMTYPE& a, ENUMTYPE b) {                                      \
+        return (ENUMTYPE&)(((_ENUM_FLAG_SIZED<ENUMTYPE>::type&)a) ^=                               \
+                           ((_ENUM_FLAG_SIZED<ENUMTYPE>::type)b));                                 \
+    }                                                                                              \
+    }
+
 namespace Common {
 
 constexpr u32 MakeMagic(char a, char b, char c, char d) {
