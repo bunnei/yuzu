@@ -85,7 +85,7 @@ public:
      *                                        This can be either 32, 36, or 39 on official software.
      */
     virtual void PageTableChanged(Common::PageTable& new_page_table,
-                                  std::size_t new_address_space_size_in_bits) = 0;
+                                  std::size_t new_address_space_size_in_bits, bool force) = 0;
 
     /**
      * Set the Program Counter to an address

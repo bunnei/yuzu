@@ -65,7 +65,7 @@ public:
     void ClearInstructionCache() override;
     void InvalidateCacheRange(VAddr addr, std::size_t size) override;
     void PageTableChanged(Common::PageTable& new_page_table,
-                          std::size_t new_address_space_size_in_bits) override;
+                          std::size_t new_address_space_size_in_bits, bool force) override;
 
 private:
     std::shared_ptr<Dynarmic::A32::Jit> MakeJit(Common::PageTable& page_table,

@@ -347,14 +347,21 @@ void ARM_Dynarmic_64::ClearExclusiveState() {
 }
 
 void ARM_Dynarmic_64::PageTableChanged(Common::PageTable& page_table,
-                                       std::size_t new_address_space_size_in_bits) {
+                                       std::size_t new_address_space_size_in_bits, bool force) {
+    ThreadContext64 ctx{};
+    SaveContext(ctx);
+
     auto key = std::make_pair(&page_table, new_address_space_size_in_bits);
     auto iter = jit_cache.find(key);
-    if (iter != jit_cache.end()) {
-        jit = iter->second;
-        return;
+    if (!force) {
+        if (iter != jit_cache.end()) {
+            jit = iter->second;
+            LoadContext(ctx);
+            return;
+        }
     }
     jit = MakeJit(page_table, new_address_space_size_in_bits);
+    LoadContext(ctx);
     jit_cache.emplace(key, jit);
 }
 

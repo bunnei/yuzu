@@ -305,7 +305,7 @@ void ARM_Dynarmic_32::ClearExclusiveState() {
 }
 
 void ARM_Dynarmic_32::PageTableChanged(Common::PageTable& page_table,
-                                       std::size_t new_address_space_size_in_bits) {
+                                       std::size_t new_address_space_size_in_bits, bool /*force*/) {
     auto key = std::make_pair(&page_table, new_address_space_size_in_bits);
     auto iter = jit_cache.find(key);
     if (iter != jit_cache.end()) {

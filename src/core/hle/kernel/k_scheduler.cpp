@@ -13,6 +13,7 @@
 #include "common/logging/log.h"
 #include "core/arm/arm_interface.h"
 #include "core/core.h"
+#include "core/memory.h"
 #include "core/core_timing.h"
 #include "core/cpu_manager.h"
 #include "core/hle/kernel/k_scheduler.h"
@@ -683,6 +684,8 @@ void KScheduler::Reload(KThread* thread) {
         if (thread_owner_process != nullptr) {
             system.Kernel().MakeCurrentProcess(thread_owner_process);
         }
+
+        system.Memory().SetCurrentPageTable(*system.CurrentProcess(), core_id, true);
 
         Core::ARM_Interface& cpu_core = system.ArmInterface(core_id);
         cpu_core.LoadContext(thread->GetContext32());
