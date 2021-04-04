@@ -119,7 +119,7 @@ void IAppletResource::GetSharedMemoryHandle(Kernel::HLERequestContext& ctx) {
 
     IPC::ResponseBuilder rb{ctx, 2, 1};
     rb.Push(RESULT_SUCCESS);
-    rb.PushCopyObjects(shared_mem);
+    rb.PushCopyObjects(shared_mem.get());
 }
 
 void IAppletResource::UpdateControllers(std::uintptr_t user_data,
