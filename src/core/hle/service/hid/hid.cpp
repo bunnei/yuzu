@@ -52,9 +52,6 @@ IAppletResource::IAppletResource(Core::System& system_)
     };
     RegisterHandlers(functions);
 
-    auto& kernel = system.Kernel();
-    shared_mem = SharedFrom(&kernel.GetHidSharedMem());
-
     MakeController<Controller_DebugPad>(HidController::DebugPad);
     MakeController<Controller_Touchscreen>(HidController::Touchscreen);
     MakeController<Controller_Mouse>(HidController::Mouse);
@@ -119,7 +116,7 @@ void IAppletResource::GetSharedMemoryHandle(Kernel::HLERequestContext& ctx) {
 
     IPC::ResponseBuilder rb{ctx, 2, 1};
     rb.Push(RESULT_SUCCESS);
-    rb.PushCopyObjects(shared_mem.get());
+    rb.PushCopyObjects(&system.Kernel().GetHidSharedMem());
 }
 
 void IAppletResource::UpdateControllers(std::uintptr_t user_data,
@@ -131,7 +128,8 @@ void IAppletResource::UpdateControllers(std::uintptr_t user_data,
         if (should_reload) {
             controller->OnLoadInputDevices();
         }
-        controller->OnUpdate(core_timing, shared_mem->GetPointer(), SHARED_MEMORY_SIZE);
+        controller->OnUpdate(core_timing, system.Kernel().GetHidSharedMem().GetPointer(),
+                             SHARED_MEMORY_SIZE);
     }
 
     // If ns_late is higher than the update rate ignore the delay
@@ -146,7 +144,7 @@ void IAppletResource::UpdateMotion(std::uintptr_t user_data, std::chrono::nanose
     auto& core_timing = system.CoreTiming();
 
     controllers[static_cast<size_t>(HidController::NPad)]->OnMotionUpdate(
-        core_timing, shared_mem->GetPointer(), SHARED_MEMORY_SIZE);
+        core_timing, system.Kernel().GetHidSharedMem().GetPointer(), SHARED_MEMORY_SIZE);
 
     // If ns_late is higher than the update rate ignore the delay
     if (ns_late > motion_update_ns) {
