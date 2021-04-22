@@ -55,8 +55,7 @@ public:
     explicit ServiceManager(Kernel::KernelCore& kernel_);
     ~ServiceManager();
 
-    ResultVal<std::shared_ptr<Kernel::KServerPort>> RegisterService(std::string name,
-                                                                    u32 max_sessions);
+    ResultVal<Kernel::KServerPort*> RegisterService(std::string name, u32 max_sessions);
     ResultCode UnregisterService(const std::string& name);
     ResultVal<Kernel::KClientPort*> GetServicePort(const std::string& name);
 

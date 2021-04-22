@@ -19,7 +19,7 @@ void KClientPort::Initialize(s32 max_sessions_, std::string&& name_) {
     name = std::move(name_);
 }
 
-std::shared_ptr<KServerPort> KClientPort::GetServerPort() const {
+KServerPort* KClientPort::GetServerPort() const {
     return server_port;
 }
 

@@ -28,7 +28,7 @@ public:
 
     void Initialize(s32 max_sessions_, std::string&& name_);
 
-    std::shared_ptr<KServerPort> GetServerPort() const;
+    KServerPort* GetServerPort() const;
 
     /**
      * Creates a new Session pair, adds the created ServerSession to the associated ServerPort's
@@ -63,10 +63,10 @@ public:
     }
 
 private:
-    std::shared_ptr<KServerPort> server_port; ///< ServerPort associated with this client port.
-    s32 max_sessions = 0; ///< Maximum number of simultaneous sessions the port can have
-    std::atomic<s32> num_sessions = 0; ///< Number of currently open sessions to this port
-    std::string name;                  ///< Name of client port (optional)
+    KServerPort* server_port{};      ///< ServerPort associated with this client port.
+    s32 max_sessions{};              ///< Maximum number of simultaneous sessions the port can have
+    std::atomic<s32> num_sessions{}; ///< Number of currently open sessions to this port
+    std::string name;                ///< Name of client port (optional)
 };
 
 } // namespace Kernel

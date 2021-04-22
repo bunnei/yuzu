@@ -16,6 +16,11 @@ namespace Kernel {
 KServerPort::KServerPort(KernelCore& kernel) : KSynchronizationObject{kernel} {}
 KServerPort::~KServerPort() = default;
 
+void KServerPort::Initialize(std::string&& name_) {
+    // Set member variables.
+    name = std::move(name_);
+}
+
 ResultVal<KServerSession*> KServerPort::Accept() {
     if (pending_sessions.empty()) {
         return ResultNotFound;
@@ -33,23 +38,28 @@ void KServerPort::AppendPendingSession(KServerSession* pending_session) {
     }
 }
 
+void KServerPort::Destroy() {}
+
 bool KServerPort::IsSignaled() const {
     return !pending_sessions.empty();
 }
 
 KServerPort::PortPair KServerPort::CreatePortPair(KernelCore& kernel, u32 max_sessions,
                                                   std::string name) {
-    std::shared_ptr<KServerPort> server_port = std::make_shared<KServerPort>(kernel);
+    KServerPort* server_port = new KServerPort(kernel);
     KClientPort* client_port = new KClientPort(kernel);
 
+    KAutoObject::Create(server_port);
     KAutoObject::Create(client_port);
 
+    server_port->Initialize(name + "_Server");
     client_port->Initialize(max_sessions, name + "_Client");
+
     client_port->server_port = server_port;
 
     server_port->name = name + "_Server";
 
-    return std::make_pair(std::move(server_port), client_port);
+    return std::make_pair(server_port, client_port);
 }
 
 } // namespace Kernel
