@@ -5,18 +5,18 @@
 #include <tuple>
 #include "common/assert.h"
 #include "core/hle/kernel/k_client_port.h"
+#include "core/hle/kernel/k_server_port.h"
 #include "core/hle/kernel/k_server_session.h"
 #include "core/hle/kernel/k_thread.h"
 #include "core/hle/kernel/object.h"
-#include "core/hle/kernel/server_port.h"
 #include "core/hle/kernel/svc_results.h"
 
 namespace Kernel {
 
-ServerPort::ServerPort(KernelCore& kernel) : KSynchronizationObject{kernel} {}
-ServerPort::~ServerPort() = default;
+KServerPort::KServerPort(KernelCore& kernel) : KSynchronizationObject{kernel} {}
+KServerPort::~KServerPort() = default;
 
-ResultVal<KServerSession*> ServerPort::Accept() {
+ResultVal<KServerSession*> KServerPort::Accept() {
     if (pending_sessions.empty()) {
         return ResultNotFound;
     }
@@ -26,20 +26,20 @@ ResultVal<KServerSession*> ServerPort::Accept() {
     return MakeResult(session);
 }
 
-void ServerPort::AppendPendingSession(KServerSession* pending_session) {
+void KServerPort::AppendPendingSession(KServerSession* pending_session) {
     pending_sessions.push_back(std::move(pending_session));
     if (pending_sessions.size() == 1) {
         NotifyAvailable();
     }
 }
 
-bool ServerPort::IsSignaled() const {
+bool KServerPort::IsSignaled() const {
     return !pending_sessions.empty();
 }
 
-ServerPort::PortPair ServerPort::CreatePortPair(KernelCore& kernel, u32 max_sessions,
-                                                std::string name) {
-    std::shared_ptr<ServerPort> server_port = std::make_shared<ServerPort>(kernel);
+KServerPort::PortPair KServerPort::CreatePortPair(KernelCore& kernel, u32 max_sessions,
+                                                  std::string name) {
+    std::shared_ptr<KServerPort> server_port = std::make_shared<KServerPort>(kernel);
     KClientPort* client_port = new KClientPort(kernel);
 
     KAutoObject::Create(client_port);

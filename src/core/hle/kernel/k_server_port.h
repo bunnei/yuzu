@@ -20,13 +20,13 @@ class KernelCore;
 class KServerSession;
 class SessionRequestHandler;
 
-class ServerPort final : public KSynchronizationObject {
+class KServerPort final : public KSynchronizationObject {
 public:
-    explicit ServerPort(KernelCore& kernel);
-    ~ServerPort() override;
+    explicit KServerPort(KernelCore& kernel);
+    ~KServerPort() override;
 
     using HLEHandler = std::shared_ptr<SessionRequestHandler>;
-    using PortPair = std::pair<std::shared_ptr<ServerPort>, KClientPort*>;
+    using PortPair = std::pair<std::shared_ptr<KServerPort>, KClientPort*>;
 
     /**
      * Creates a pair of ServerPort and an associated ClientPort.
