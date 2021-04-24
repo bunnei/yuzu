@@ -25,7 +25,7 @@ class NACP;
 
 namespace Kernel {
 struct AddressMapping;
-class Process;
+class KProcess;
 } // namespace Kernel
 
 namespace Loader {
@@ -162,7 +162,7 @@ public:
      * @param system  The system that this process is being loaded under.
      * @return The status result of the operation.
      */
-    virtual LoadResult Load(Kernel::Process& process, Core::System& system) = 0;
+    virtual LoadResult Load(Kernel::KProcess& process, Core::System& system) = 0;
 
     /**
      * Get the code (typically .code section) of the application

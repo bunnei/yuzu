@@ -19,7 +19,7 @@ class NACP;
 }
 
 namespace Kernel {
-class Process;
+class KProcess;
 }
 
 namespace Loader {
@@ -41,7 +41,7 @@ public:
         return IdentifyType(file);
     }
 
-    LoadResult Load(Kernel::Process& process, Core::System& system) override;
+    LoadResult Load(Kernel::KProcess& process, Core::System& system) override;
 
     ResultStatus ReadIcon(std::vector<u8>& buffer) override;
     ResultStatus ReadProgramId(u64& out_program_id) override;
@@ -51,7 +51,7 @@ public:
     bool IsRomFSUpdatable() const override;
 
 private:
-    bool LoadNro(Kernel::Process& process, const FileSys::VfsFile& file);
+    bool LoadNro(Kernel::KProcess& process, const FileSys::VfsFile& file);
 
     std::vector<u8> icon_data;
     std::unique_ptr<FileSys::NACP> nacp;
