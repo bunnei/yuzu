@@ -7,6 +7,7 @@
 #include "common/common_funcs.h"
 #include "common/common_types.h"
 #include "core/core.h"
+#include "core/device_memory.h"
 #include "core/hardware_properties.h"
 #include "core/hle/kernel/init/init_slab_setup.h"
 #include "core/hle/kernel/k_event.h"
@@ -70,22 +71,18 @@ constexpr size_t SlabCountExtraKThread = 160;
 template <typename T>
 VAddr InitializeSlabHeap(Core::System& system, KMemoryLayout& memory_layout, VAddr address,
                          size_t num_objects) {
-    // TODO(bunnei): This is just a place holder. We should initialize the appropriate KSlabHeap for
-    // kernel object type T with the backing kernel memory pointer once we emulate kernel memory.
-
     const size_t size = Common::AlignUp(sizeof(T) * num_objects, alignof(void*));
     VAddr start = Common::AlignUp(address, alignof(T));
-
-    // This is intentionally empty. Once KSlabHeap is fully implemented, we can replace this with
-    // the pointer to emulated memory to pass along. Until then, KSlabHeap will just allocate/free
-    // host memory.
-    void* backing_kernel_memory{};
 
     if (size > 0) {
         const KMemoryRegion* region = memory_layout.FindVirtual(start + size - 1);
         ASSERT(region != nullptr);
         ASSERT(region->IsDerivedFrom(KMemoryRegionType_KernelSlab));
-        T::InitializeSlabHeap(system.Kernel(), backing_kernel_memory, size);
+
+        constexpr VAddr KernelSlabRegionVAddr = 0xffffff801b000000ULL;
+        const PAddr paddr = start - KernelSlabRegionVAddr + Core::DramMemoryMap::KernelSlabHeapBase;
+
+        T::InitializeSlabHeap(system.Kernel(), system.DeviceMemory().GetPointer(paddr), size);
     }
 
     return start + size;

@@ -16,6 +16,7 @@ enum : u64 {
     End = Base + Size,
     KernelReserveBase = Base + 0x60000,
     SlabHeapBase = KernelReserveBase + 0x85000,
+    KernelSlabHeapBase = SlabHeapBase + 0x3de000,
     SlapHeapSize = 0xa21000,
     SlabHeapEnd = SlabHeapBase + SlapHeapSize,
 };
